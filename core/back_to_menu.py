@@ -1,0 +1,2 @@
+class BackToMenu(Exception):
+    pass
