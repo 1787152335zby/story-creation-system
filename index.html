@@ -6,7 +6,10 @@
     <title>多智能体故事创作系统</title>
   </head>
   <body class="min-h-screen bg-background text-foreground">
-    <div id="root"></div>
+    <div id="theme-bg-layer" class="fixed inset-0 pointer-events-none" style="z-index: 1"></div>
+    <div id="theme-texture-layer" class="fixed inset-0 pointer-events-none" style="z-index: 2"></div>
+    <div id="theme-ambient-layer" class="fixed inset-0 pointer-events-none" style="z-index: 3"></div>
+    <div id="root" class="min-h-screen relative" style="z-index: 4"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

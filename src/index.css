@@ -3,24 +3,6 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --background: 222 47% 5%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 7%;
-    --card-foreground: 210 40% 98%;
-    --primary: 252 87% 67%;
-    --primary-foreground: 0 0% 100%;
-    --muted: 223 30% 12%;
-    --muted-foreground: 215 20% 65%;
-    --border: 223 25% 15%;
-    --radius: 0.75rem;
-    --accent: 170 70% 55%;
-    --accent-foreground: 0 0% 0%;
-    --warning: 35 92% 55%;
-    --success: 150 60% 50%;
-    --danger: 0 80% 60%;
-  }
-
   * {
     border-color: hsl(var(--border));
   }
@@ -49,68 +31,253 @@
   }
 }
 
-/* 主题 — 使用 html.theme-xxx 确保特异性高于 :root */
-html.theme-aurora {
-  --background: 220 50% 5%;
-  --foreground: 210 40% 98%;
-  --card: 220 50% 7%;
-  --primary: 200 85% 60%;
+/* ===== 色系：控制全局 CSS 变量 ===== */
+/* 使用 html.palette-xxx 确保特异性高于 :root */
+
+/* 默认色系：星云紫 */
+html:not([class*="palette-"]),
+html.palette-nebula {
+  --background: 270 20% 8%;
+  --foreground: 260 25% 95%;
+  --card: 270 20% 10%;
+  --card-foreground: 260 25% 95%;
+  --primary: 270 80% 65%;
   --primary-foreground: 0 0% 100%;
-  --muted: 220 35% 12%;
-  --muted-foreground: 210 25% 65%;
-  --border: 220 30% 15%;
+  --muted: 270 15% 13%;
+  --muted-foreground: 260 15% 60%;
+  --border: 270 15% 18%;
+  --radius: 0.75rem;
+  --accent: 230 70% 55%;
+  --accent-foreground: 0 0% 100%;
+  --warning: 35 92% 55%;
+  --success: 150 60% 50%;
+  --danger: 0 80% 60%;
+}
+
+/* 极光蓝 */
+html.palette-aurora {
+  --background: 210 20% 8%;
+  --foreground: 210 35% 95%;
+  --card: 210 20% 10%;
+  --card-foreground: 210 35% 95%;
+  --primary: 195 90% 58%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 210 15% 13%;
+  --muted-foreground: 210 20% 60%;
+  --border: 210 18% 18%;
   --accent: 180 80% 50%;
+  --accent-foreground: 0 0% 100%;
   --warning: 35 92% 55%;
   --success: 150 60% 50%;
   --danger: 0 80% 60%;
 }
 
-html.theme-blaze {
-  --background: 0 40% 5%;
-  --foreground: 30 40% 98%;
-  --card: 0 40% 7%;
-  --primary: 25 90% 60%;
+/* 琥珀橙 */
+html.palette-amber {
+  --background: 25 15% 8%;
+  --foreground: 30 30% 95%;
+  --card: 25 15% 10%;
+  --card-foreground: 30 30% 95%;
+  --primary: 30 95% 60%;
   --primary-foreground: 0 0% 100%;
-  --muted: 0 30% 12%;
-  --muted-foreground: 20 25% 65%;
-  --border: 0 25% 15%;
+  --muted: 25 12% 13%;
+  --muted-foreground: 25 18% 60%;
+  --border: 25 15% 18%;
   --accent: 350 80% 55%;
+  --accent-foreground: 0 0% 100%;
   --warning: 35 92% 55%;
   --success: 150 60% 50%;
   --danger: 0 80% 60%;
 }
 
-html.theme-jade {
-  --background: 150 40% 5%;
-  --foreground: 140 30% 98%;
-  --card: 150 40% 7%;
-  --primary: 160 75% 45%;
+/* 翡翠绿 */
+html.palette-jade {
+  --background: 155 15% 8%;
+  --foreground: 150 25% 94%;
+  --card: 155 15% 10%;
+  --card-foreground: 150 25% 94%;
+  --primary: 155 75% 45%;
   --primary-foreground: 0 0% 100%;
-  --muted: 150 30% 12%;
-  --muted-foreground: 140 20% 65%;
-  --border: 150 25% 15%;
+  --muted: 155 12% 13%;
+  --muted-foreground: 150 15% 58%;
+  --border: 155 15% 17%;
   --accent: 120 60% 50%;
+  --accent-foreground: 0 0% 0%;
   --warning: 35 92% 55%;
   --success: 150 60% 50%;
   --danger: 0 80% 60%;
 }
 
-html.theme-light {
-  --background: 0 0% 98%;
-  --foreground: 220 20% 15%;
-  --card: 0 0% 100%;
-  --card-foreground: 220 20% 15%;
-  --primary: 252 87% 60%;
+/* 玫瑰红 */
+html.palette-rose {
+  --background: 340 15% 8%;
+  --foreground: 340 25% 94%;
+  --card: 340 15% 10%;
+  --card-foreground: 340 25% 94%;
+  --primary: 340 80% 60%;
   --primary-foreground: 0 0% 100%;
-  --muted: 220 15% 92%;
-  --muted-foreground: 220 10% 50%;
-  --border: 220 15% 85%;
+  --muted: 340 12% 13%;
+  --muted-foreground: 340 15% 58%;
+  --border: 340 15% 17%;
+  --accent: 290 65% 55%;
+  --accent-foreground: 0 0% 100%;
+  --warning: 35 92% 55%;
+  --success: 150 60% 50%;
+  --danger: 0 80% 60%;
+}
+
+/* 月光白（浅色主题） */
+html.palette-moonlight {
+  --background: 45 10% 96%;
+  --foreground: 250 15% 18%;
+  --card: 0 0% 100%;
+  --card-foreground: 250 15% 18%;
+  --primary: 250 70% 55%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 45 12% 90%;
+  --muted-foreground: 250 10% 50%;
+  --border: 45 12% 85%;
   --radius: 0.75rem;
   --accent: 170 70% 40%;
   --accent-foreground: 0 0% 100%;
   --warning: 35 92% 55%;
   --success: 150 60% 45%;
   --danger: 0 80% 55%;
+}
+
+/* ===== 第二层：背景效果 ===== */
+html.bg-solid #theme-bg-layer { background: transparent; }
+
+html.bg-subtle #theme-bg-layer {
+  background: linear-gradient(135deg, transparent 40%, hsl(var(--foreground) / 0.02) 100%);
+}
+
+html.bg-aurora-grad #theme-bg-layer {
+  background:
+    radial-gradient(ellipse 80% 55% at 25% 20%, hsl(var(--primary) / 0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 70% at 75% 80%, hsl(var(--accent) / 0.08) 0%, transparent 60%);
+}
+
+html.bg-aurora-grad.theme-animated #theme-bg-layer {
+  animation: bg-drift 15s ease-in-out infinite alternate;
+}
+
+html.bg-dusk #theme-bg-layer {
+  background:
+    linear-gradient(135deg, hsl(var(--primary) / 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 80% 90%, hsl(var(--warning) / 0.06) 0%, transparent 60%);
+}
+
+html.bg-dusk.theme-animated #theme-bg-layer {
+  animation: bg-drift 12s ease-in-out infinite alternate;
+}
+
+html.bg-deep #theme-bg-layer {
+  background:
+    linear-gradient(180deg, hsl(var(--primary) / 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 50% 60%, hsl(var(--accent) / 0.05) 0%, transparent 70%);
+}
+
+html.bg-deep.theme-animated #theme-bg-layer {
+  animation: bg-drift 18s ease-in-out infinite alternate;
+}
+
+html.bg-nebula-grad #theme-bg-layer {
+  background:
+    radial-gradient(ellipse 70% 50% at 15% 30%, hsl(var(--primary) / 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 85% 40%, hsl(var(--accent) / 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 40% at 50% 80%, hsl(var(--warning) / 0.05) 0%, transparent 50%);
+}
+
+html.bg-nebula-grad.theme-animated #theme-bg-layer {
+  animation: bg-drift 20s ease-in-out infinite alternate;
+}
+
+@keyframes bg-drift {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
+}
+
+/* ===== 第三层：纹理效果 ===== */
+html.texture-none #theme-texture-layer { display: none; }
+
+html.texture-noise #theme-texture-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+html.texture-grid #theme-texture-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  opacity: 0.06;
+  background-image:
+    linear-gradient(to right, hsl(var(--foreground)) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--foreground)) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+html.texture-dots #theme-texture-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  opacity: 0.07;
+  background-image: radial-gradient(circle, hsl(var(--foreground)) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+html.texture-ripple #theme-texture-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  opacity: 0.04;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 20px, hsl(var(--primary) / 0.4) 20px, hsl(var(--primary) / 0.4) 21px),
+    repeating-linear-gradient(90deg, transparent, transparent 40px, hsl(var(--accent) / 0.3) 40px, hsl(var(--accent) / 0.3) 41px);
+}
+
+/* ===== 第四层：氛围光效 ===== */
+html.ambient-none #theme-ambient-layer { display: none; }
+
+html.ambient-top-glow #theme-ambient-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 60% 25% at 50% 0%, hsl(var(--primary) / 0.10) 0%, transparent 60%);
+}
+
+html.ambient-edge-glow #theme-ambient-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  box-shadow: inset 0 0 80px 0 hsl(var(--primary) / 0.06);
+}
+
+html.ambient-corner #theme-ambient-layer {
+  display: block; position: fixed; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 50% 40% at 85% 90%, hsl(var(--accent) / 0.08) 0%, transparent 60%);
+}
+
+html.ambient-orbit #theme-ambient-layer {
+  display: block; position: fixed; inset: -50%; z-index: -1; pointer-events: none;
+  background: conic-gradient(from 0deg, transparent 60%, hsl(var(--primary) / 0.04) 70%, transparent 80%);
+  animation: orbit-rotate 20s linear infinite;
+}
+
+@keyframes orbit-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+html.ambient-stardust #theme-ambient-layer {
+  display: block; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  overflow: hidden;
+}
+html.ambient-stardust #theme-ambient-layer::before,
+html.ambient-stardust #theme-ambient-layer::after {
+  content: ''; position: absolute; width: 3px; height: 3px;
+  background: hsl(var(--primary) / 0.3); border-radius: 50%;
+  animation: stardust-float 8s ease-in-out infinite alternate;
+}
+html.ambient-stardust #theme-ambient-layer::before { top: 30%; left: 20%; animation-delay: 0s; }
+html.ambient-stardust #theme-ambient-layer::after { top: 60%; right: 25%; width: 2px; height: 2px; animation-delay: 3s; }
+
+@keyframes stardust-float {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.3; }
+  100% { transform: translate(30px, -20px) scale(1.2); opacity: 0.8; }
 }
 
 /* Gradient animations */

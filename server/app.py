@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .routes.projects import router as projects_router
 from .routes.settings import router as settings_router
@@ -53,6 +53,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    tb = traceback.format_exc()
+    print(f"[Unhandled Error] {request.method} {request.url.path}: {exc}")
+    print(tb)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__}
+    )
+
 
 app.include_router(projects_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")

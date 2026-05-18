@@ -16,7 +16,6 @@ generated/
 Thumbs.db
 *.log
 aggregated_configs.json
-
-.node/
+.build-errors.txt
 
 .node/

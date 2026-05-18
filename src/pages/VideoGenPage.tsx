@@ -5,7 +5,9 @@ import { fetchProjects, fetchVideoClips, getMediaUrl, freeVideoGen, fetchVideoRe
 import ModelSelector from '../components/ModelSelector'
 import VideoProjectPanel from '../components/VideoProjectPanel'
 import ImagePreview from '../components/ImagePreview'
+import ProjectAssetPicker from '../components/ProjectAssetPicker'
 
+import type { ProjectInfo, EntityImage, EntityImagesMap } from '../lib/types'
 import { useToast } from '../components/Toast'
 
 export default function VideoGenPage() {
@@ -17,6 +19,7 @@ export default function VideoGenPage() {
   // Free mode
   const [freePrompt, setFreePrompt] = useState('')
   const [freeFiles, setFreeFiles] = useState<{ file: File; preview: string }[]>([])
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [freeGenerating, setFreeGenerating] = useState(false)
   const [freeResult, setFreeResult] = useState<{ video_url?: string; local?: string; error?: string } | null>(null)
   const [resolutions, setResolutions] = useState<string[]>([])
@@ -26,16 +29,17 @@ export default function VideoGenPage() {
   const [videoModel, setVideoModel] = useState('')
   const [freeElapsed, setFreeElapsed] = useState(0)
   const [generateAudio, setGenerateAudio] = useState(false)
-  const [refProjects, setRefProjects] = useState<any[]>([])
+  const [refProjects, setRefProjects] = useState<ProjectInfo[]>([])
   const [selectedRefProject, setSelectedRefProject] = useState('')
-  const [refProjectImages, setRefProjectImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
+  const [refProjectImages, setRefProjectImages] = useState<EntityImagesMap>({ characters: {}, scenes: {} })
   const [historyVideos, setHistoryVideos] = useState<{ name: string; url: string }[]>([])
-  const [projectImages, setProjectImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
-  const [confirmedImages, setConfirmedImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
+  const [projectImages, setProjectImages] = useState<EntityImagesMap>({ characters: {}, scenes: {} })
+  const [confirmedImages, setConfirmedImages] = useState<EntityImagesMap>({ characters: {}, scenes: {} })
+  const [selectedRefEntity, setSelectedRefEntity] = useState<string | null>(null)
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
   // Project mode
-  const [projects, setProjects] = useState<any[]>([])
+  const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [selectedProject, setSelectedProject] = useState<string>('')
   const [clips, setClips] = useState<{ name: string; file: string }[]>([])
   const [finalClip, setFinalClip] = useState<{ name: string; file: string } | null>(null)
@@ -146,6 +150,18 @@ export default function VideoGenPage() {
     ws.onerror = () => { addLog('❌ 连接失败'); setGenerating(null) }
   }
 
+  const handleDragStart = (i: number) => setDragIndex(i)
+  const handleDragOver = (e: React.DragEvent, i: number) => {
+    e.preventDefault()
+    if (dragIndex === null || dragIndex === i) return
+    const newFiles = [...freeFiles]
+    const [moved] = newFiles.splice(dragIndex, 1)
+    newFiles.splice(i, 0, moved)
+    setFreeFiles(newFiles)
+    setDragIndex(i)
+  }
+  const handleDragEnd = () => setDragIndex(null)
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       <div className="fixed inset-0 pointer-events-none">
@@ -186,7 +202,11 @@ export default function VideoGenPage() {
               {freeFiles.length > 0 && (
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 mb-4">
                   {freeFiles.map((entry, i) => (
-                    <div key={i} className="relative group">
+                    <div key={i} className={`relative group ${dragIndex === i ? 'opacity-50 ring-2 ring-primary' : ''}`}
+                      draggable={true}
+                      onDragStart={() => handleDragStart(i)}
+                      onDragOver={(e) => handleDragOver(e, i)}
+                      onDragEnd={handleDragEnd}>
                       <img src={entry.preview} alt="" className="w-full h-28 object-cover rounded-xl" />
                       <button onClick={() => removeFile(i)}
                         className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
@@ -198,105 +218,21 @@ export default function VideoGenPage() {
               )}
 
               {/* Project reference gallery */}
-              <div className="glass-card rounded-xl p-4 mb-4">
-                <label className="text-xs font-medium text-muted-foreground mb-2 block">📂 引用项目素材（点击图片添加到参考）</label>
-                <select value={selectedRefProject} onChange={e => setSelectedRefProject(e.target.value)} 
-                  className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-xs mb-3">
-                  <option value="">-- 不引用 --</option>
-                  {refProjects.map((p: any) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                </select>
-                {Object.keys(refProjectImages.characters).length > 0 && (
-                  <div className="mb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">👤 角色</p>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(refProjectImages.characters).map(([name, imgs]) =>
-                        (imgs as any[]).map((img, i) => (
-                          <img key={`${name}-${i}`} src={img.url} alt={name}
-                            className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                            onClick={() => { 
-                              fetch(img.url).then(r => r.blob()).then(blob => {
-                                const file = new File([blob], `${name}.png`, { type: 'image/png' })
-                                const reader = new FileReader()
-                                reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-                                reader.readAsDataURL(blob)
-                              })
-                            }} title={name} />
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-                {Object.keys(refProjectImages.scenes).length > 0 && (
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">🌆 场景</p>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(refProjectImages.scenes).map(([name, imgs]) =>
-                        (imgs as any[]).map((img, i) => (
-                          <img key={`${name}-${i}`} src={img.url} alt={name}
-                            className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                            onClick={() => {
-                              fetch(img.url).then(r => r.blob()).then(blob => {
-                                const file = new File([blob], `${name}.png`, { type: 'image/png' })
-                                const reader = new FileReader()
-                                reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-                                reader.readAsDataURL(blob)
-                              })
-                            }} title={name} />
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Confirmed images from current project */}
-              {(Object.keys(confirmedImages.characters).length > 0 || Object.keys(confirmedImages.scenes).length > 0) && (
-                <div className="glass-card rounded-xl p-4 mb-4">
-                  <label className="text-xs font-medium text-muted-foreground mb-2 block">✅ 已确认素材（点击添加到参考）</label>
-                  {Object.keys(confirmedImages.characters).length > 0 && (
-                    <div className="mb-2">
-                      <p className="text-[10px] text-muted-foreground mb-1">👤 角色</p>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(confirmedImages.characters).map(([name, imgs]) =>
-                          (imgs as any[]).map((img, i) => (
-                            <img key={`${name}-${i}`} src={img.url} alt={name}
-                              className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-green-400/50 transition-all"
-                              onClick={() => { 
-                                fetch(img.url).then(r => r.blob()).then(blob => {
-                                  const file = new File([blob], `${name}.png`, { type: 'image/png' })
-                                  const reader = new FileReader()
-                                  reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-                                  reader.readAsDataURL(blob)
-                                })
-                              }} title={name} />
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {Object.keys(confirmedImages.scenes).length > 0 && (
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">🌆 场景</p>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(confirmedImages.scenes).map(([name, imgs]) =>
-                          (imgs as any[]).map((img, i) => (
-                            <img key={`${name}-${i}`} src={img.url} alt={name}
-                              className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-green-400/50 transition-all"
-                              onClick={() => {
-                                fetch(img.url).then(r => r.blob()).then(blob => {
-                                  const file = new File([blob], `${name}.png`, { type: 'image/png' })
-                                  const reader = new FileReader()
-                                  reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-                                  reader.readAsDataURL(blob)
-                                })
-                              }} title={name} />
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              <ProjectAssetPicker
+                projectName={selectedRefProject || ''}
+                assets={{ characters: [], scenes: [] }}
+                entityImages={refProjectImages}
+                selectedEntity={selectedRefEntity}
+                onSelectEntity={setSelectedRefEntity}
+                onAddAsset={(url) => {
+                  fetch(url).then(r => r.blob()).then(blob => {
+                    const file = new File([blob], 'ref.png', { type: 'image/png' })
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+                    reader.readAsDataURL(blob)
+                  })
+                }}
+              />
 
               {/* Prompt */}
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">动作描述</label>

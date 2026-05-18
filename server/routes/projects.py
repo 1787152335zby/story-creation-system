@@ -7,6 +7,7 @@ from ..schemas import CreateProjectRequest, StyleConfigRequest
 
 router = APIRouter()
 PROJECTS_DIR = Path(__file__).resolve().parent.parent.parent / "projects"
+GENERATED_DIR = Path(__file__).resolve().parent.parent.parent / "generated"
 
 
 def _build_project_list() -> list:
@@ -190,6 +191,7 @@ def list_visual_assets(name: str):
     project_dir = PROJECTS_DIR / name
     assets = {"characters": [], "scenes": []}
 
+    # 1. 07_视觉素材/ 下的 PNG 图片（AI 素材提取产生的）
     chars_dir = project_dir / "07_视觉素材" / "角色"
     if chars_dir.exists():
         for f in sorted(chars_dir.glob("*.png")):
@@ -199,6 +201,30 @@ def list_visual_assets(name: str):
     if scenes_dir.exists():
         for f in sorted(scenes_dir.glob("*.png")):
             assets["scenes"].append({"name": f.stem, "file": f.name})
+
+    # 2. generated/projects/{name}/ 下的生成图片（智能生图产生的）
+    gen_dir = GENERATED_DIR / "projects" / name
+    for entity_type in ["characters", "scenes"]:
+        entities_dir = gen_dir / entity_type
+        if entities_dir.exists():
+            for folder in sorted(entities_dir.iterdir()):
+                if not folder.is_dir():
+                    continue
+                # 扫描 v1/, v2/ 等版本子文件夹和已确认图片
+                seen = set()
+                for f in sorted(folder.iterdir()):
+                    if f.is_dir() and f.name.startswith("v"):
+                        for img in sorted(f.iterdir()):
+                            if img.is_file() and img.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                                if img.name not in seen:
+                                    seen.add(img.name)
+                                    file_path = f"projects/{name}/{entity_type}/{folder.name}/{f.name}/{img.name}"
+                                    assets[entity_type].append({"name": folder.name, "file": file_path, "from_generated": True})
+                    elif f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                        if f.name not in seen:
+                            seen.add(f.name)
+                            file_path = f"projects/{name}/{entity_type}/{folder.name}/{f.name}"
+                            assets[entity_type].append({"name": folder.name, "file": file_path, "from_generated": True})
 
     return assets
 

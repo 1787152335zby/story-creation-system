@@ -1,5 +1,5 @@
-import { ReactNode } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { ReactNode, useEffect } from 'react'
+import { Routes, Route, useNavigate } from 'react-router-dom'
 import { ToastProvider } from './components/Toast'
 import ErrorBoundary from './components/ErrorBoundary'
 import ThemeSwitcher from './components/ThemeSwitcher'
@@ -15,8 +15,30 @@ function E({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const map: Record<string, string> = {
+        '1': '/',
+        '2': '/image-gen',
+        '3': '/video-gen',
+        '4': '/settings',
+      }
+      const path = map[e.key]
+      if (path) {
+        e.preventDefault()
+        navigate(path)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [navigate])
+
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen text-foreground">
       <ToastProvider>
         <Routes>
           <Route path="/" element={<E><HomePage /></E>} />

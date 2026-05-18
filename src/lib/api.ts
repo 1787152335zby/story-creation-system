@@ -1,3 +1,5 @@
+import type { ProjectInfo, EntityImagesMap, FreeImageResult, ProjectImageGenResult, FreeVideoResult, GenerationHistory, Template } from './types'
+
 const BASE = '/api'
 
 export interface StyleConfig {
@@ -61,13 +63,13 @@ export interface SettingsData {
   banana2_model: string
 }
 
-export async function fetchProjects(): Promise<any[]> {
+export async function fetchProjects(): Promise<ProjectInfo[]> {
   const res = await fetch(`${BASE}/projects`)
   if (!res.ok) throw new Error('Failed to fetch projects')
   return res.json()
 }
 
-export async function fetchProject(name: string): Promise<any> {
+export async function fetchProject(name: string): Promise<ProjectInfo> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}`)
   if (!res.ok) throw new Error('Project not found')
   return res.json()
@@ -182,7 +184,7 @@ export function getMediaUrl(name: string, subpath: string): string {
   return `${BASE}/projects/${encodeURIComponent(name)}/media/${encodeURIComponent(subpath)}`
 }
 
-export async function freeImageGen(prompt: string, negativePrompt: string = '', size: string = '1024x1024', n: number = 1, model: string = ''): Promise<{ images: { url: string; local: string }[] }> {
+export async function freeImageGen(prompt: string, negativePrompt: string = '', size: string = '1024x1024', n: number = 1, model: string = ''): Promise<FreeImageResult> {
   const res = await fetch(`${BASE}/image-gen/free`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -200,7 +202,7 @@ export async function freeImageGen(prompt: string, negativePrompt: string = '', 
   return res.json()
 }
 
-export async function freeVideoGen(prompt: string, files?: File[], model?: string, resolution?: string, duration?: number, generate_audio?: boolean): Promise<{ video_url?: string; local?: string; error?: string; task_id?: string }> {
+export async function freeVideoGen(prompt: string, files?: File[], model?: string, resolution?: string, duration?: number, generate_audio?: boolean): Promise<FreeVideoResult> {
   const form = new FormData()
   form.append('prompt', prompt)
   if (files && files.length > 0) files.forEach(f => form.append('files', f))
@@ -215,10 +217,26 @@ export async function freeVideoGen(prompt: string, files?: File[], model?: strin
   return res.json()
 }
 
-export async function fetchProjectVisualAssets(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
+export async function fetchProjectVisualAssets(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/visual-assets`)
   if (!res.ok) return { characters: {}, scenes: {} }
-  return res.json()
+  const raw: { characters: { name: string; file: string; from_generated?: boolean }[]; scenes: { name: string; file: string; from_generated?: boolean }[] } = await res.json()
+  const result: { characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> } = { characters: {}, scenes: {} }
+  for (const item of raw.characters || []) {
+    const url = item.from_generated
+      ? `/api/gen-files/${item.file}`
+      : getMediaUrl(projectName, `07_视觉素材/角色/${item.file}`)
+    if (!result.characters[item.name]) result.characters[item.name] = []
+    result.characters[item.name].push({ name: item.name, url })
+  }
+  for (const item of raw.scenes || []) {
+    const url = item.from_generated
+      ? `/api/gen-files/${item.file}`
+      : getMediaUrl(projectName, `07_视觉素材/场景/${item.file}`)
+    if (!result.scenes[item.name]) result.scenes[item.name] = []
+    result.scenes[item.name].push({ name: item.name, url })
+  }
+  return result
 }
 
 export async function fetchImageResolutions(model?: string): Promise<{ resolutions: string[]; groups: Record<string, string[]> }> {
@@ -261,7 +279,7 @@ export async function saveProjectTemplate(name: string, templateName: string): P
   return res.json()
 }
 
-export async function fetchTemplates(): Promise<any[]> {
+export async function fetchTemplates(): Promise<Template[]> {
   const res = await fetch(`${BASE}/templates`)
   if (!res.ok) return []
   return res.json()
@@ -333,7 +351,7 @@ export async function fetchActiveConfig(configType: string): Promise<any> {
   return res.json()
 }
 
-export async function fetchGenerationHistory(): Promise<{ images_free: { name: string; url: string }[]; images_project: { name: string; url: string }[]; videos: { name: string; url: string }[] }> {
+export async function fetchGenerationHistory(): Promise<GenerationHistory> {
   const res = await fetch(`${BASE}/generated-history`)
   if (!res.ok) return { images_free: [], images_project: [], videos: [] }
   return res.json()
@@ -351,7 +369,7 @@ export async function projectImageGen(params: {
   reference_url?: string
   reference_urls?: string[]
   version?: string
-}): Promise<{ images: { url: string; local: string }[]; project_images: { folder: string; images: { url: string; local: string }[] }[]; versions?: Record<string, number> }> {
+}): Promise<ProjectImageGenResult> {
   const res = await fetch(`${BASE}/image-gen/project`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -371,13 +389,13 @@ export async function stitchImages(imagePaths: string[], saveTo: string = ''): P
   return res.json()
 }
 
-export async function fetchProjectImages(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
+export async function fetchProjectImages(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/image-gen/project-images/${encodeURIComponent(projectName)}`)
   if (!res.ok) return { characters: {}, scenes: {} }
   return res.json()
 }
 
-export async function fetchConfirmedImages(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
+export async function fetchConfirmedImages(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/image-gen/confirmed-images/${encodeURIComponent(projectName)}`)
   if (!res.ok) return { characters: {}, scenes: {} }
   return res.json()

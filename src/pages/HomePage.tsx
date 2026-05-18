@@ -3,18 +3,19 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Settings, Film, FolderOpen, Trash2, AlertTriangle, Image, Video, BookText, Sparkles, Search } from 'lucide-react'
 import { fetchProjects, deleteProject, openProjectFolder, fetchSettings, fetchTemplates, deleteTemplate } from '../lib/api'
 import { useToast } from '../components/Toast'
+import type { ProjectInfo, Template } from '../lib/types'
 
 const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '提示词']
 
 export default function HomePage() {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const [projects, setProjects] = useState<any[]>([])
+  const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<string | null>(null)
   const [showSetupPrompt, setShowSetupPrompt] = useState(false)
-  const [templates, setTemplates] = useState<any[]>([])
+  const [templates, setTemplates] = useState<Template[]>([])
   const [showAllProjects, setShowAllProjects] = useState(false)
   const [showAllTemplates, setShowAllTemplates] = useState(false)
   const [searchText, setSearchText] = useState('')
@@ -24,16 +25,16 @@ export default function HomePage() {
     let list = projects
     if (searchText.trim()) {
       const q = searchText.trim().toLowerCase()
-      list = list.filter((p: any) => p.name?.toLowerCase().includes(q))
+      list = list.filter((p: ProjectInfo) => p.name?.toLowerCase().includes(q))
     }
     if (statusFilter === 'progress') {
-      list = list.filter((p: any) => {
+      list = list.filter((p: ProjectInfo) => {
         const done = (p.phases || []).filter((ph: any) => ph.done).length
         const total = p.total_phases || p.phases?.length || 5
         return done > 0 && done < total
       })
     } else if (statusFilter === 'done') {
-      list = list.filter((p: any) => {
+      list = list.filter((p: ProjectInfo) => {
         const done = (p.phases || []).filter((ph: any) => ph.done).length
         const total = p.total_phases || p.phases?.length || 5
         return done >= total
@@ -292,7 +293,7 @@ export default function HomePage() {
               </h2>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {(showAllTemplates ? templates : templates.slice(0, 8)).map((t: any) => (
+              {(showAllTemplates ? templates : templates.slice(0, 8)).map((t: Template) => (
                 <div key={t.name} className="glass-card rounded-xl p-4 group hover:ring-2 hover:ring-primary/30 transition-all">
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1 min-w-0">
