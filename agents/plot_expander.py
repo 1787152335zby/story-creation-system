@@ -26,6 +26,15 @@ class PlotExpander(AgentBase):
     def run_stream(self, project: ProjectManager, style: StyleConfig, input_content: str):
         template = self.load_prompt_template("plot_expander.txt")
 
+        confirmed_direction = ""
+        outline_content = project.read_output("01_故事大纲/故事大纲.md") or ""
+        direction_match = re.search(r'> ✅ 已选中版本[AB]。(差异摘要.*?)$', outline_content, re.MULTILINE)
+        if direction_match:
+            confirmed_direction = direction_match.group(1).strip()
+        if not confirmed_direction:
+            confirmed_direction = "（未设置）"
+        template = template.replace("{confirmed_direction}", confirmed_direction)
+
         feedback = ""
         if "## 修改意见" in input_content:
             parts = input_content.split("## 修改意见")
@@ -48,7 +57,8 @@ class PlotExpander(AgentBase):
                                                        story_type_name, style, feedback, plan)
             return
 
-        iterator = ChunkIter(plan, outline)
+        pre_analyzed = ChunkStrategy.pre_analyze_split_points(outline, self.call_llm_stream)
+        iterator = ChunkIter(plan, outline, pre_analyzed)
 
         if plan.chunk_count == 0:
             yield from self._resolve_auto_chunks(iterator, template, outline, style_context,
@@ -234,3 +244,23 @@ class PlotExpander(AgentBase):
         for token in self.call_llm_stream(summary_prompt, "", temperature=0.3):
             summary_raw += token
         return SummaryExtractor.parse_summary(summary_raw)
+
+    def _extract_promise_list(self, outline_content: str) -> str:
+        if not outline_content:
+            return "（无大纲内容）"
+        prompt = (
+            "以下是一个故事大纲。请分析并输出该故事必须包含的角色、关键事件和核心冲突。\n"
+            "格式如下，不要额外内容：\n"
+            "```\n"
+            "【本故事承诺】\n"
+            "- 必须出场的角色：XXX、XXX\n"
+            "- 必须发生的关键事件：XXX、XXX\n"
+            "- 必须解决的核心冲突：XXX\n"
+            "```\n\n"
+            f"{outline_content[:4000]}"
+        )
+        result = ""
+        for token in self.call_llm_stream(prompt, "", temperature=0.3):
+            result += token
+        match = re.search(r'【本故事承诺】.*', result, re.DOTALL)
+        return match.group(0) if match else "（未能提取承诺清单）"

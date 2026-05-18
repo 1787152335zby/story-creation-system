@@ -1,14 +1,16 @@
-import { ReactNode, useEffect } from 'react'
+import { useState, useEffect, ReactNode } from 'react'
 import { Routes, Route, useNavigate } from 'react-router-dom'
 import { ToastProvider } from './components/Toast'
 import ErrorBoundary from './components/ErrorBoundary'
 import ThemeSwitcher from './components/ThemeSwitcher'
+import SceneBackground from './components/SceneBackground'
 import HomePage from './pages/HomePage'
 import NewProjectWizard from './pages/NewProjectWizard'
 import Workspace from './pages/Workspace'
 import SettingsPage from './pages/SettingsPage'
 import ImageGenPage from './pages/ImageGenPage'
 import VideoGenPage from './pages/VideoGenPage'
+import type { SceneTheme } from './components/SceneBackground'
 
 function E({ children }: { children: ReactNode }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
@@ -16,6 +18,14 @@ function E({ children }: { children: ReactNode }) {
 
 export default function App() {
   const navigate = useNavigate()
+  const [scene, setScene] = useState<SceneTheme>('space')
+
+  useEffect(() => {
+    try { const s = localStorage.getItem('theme_scene'); if (s) setScene(JSON.parse(s)) } catch {}
+    const handler = (e: Event) => setScene((e as CustomEvent).detail as SceneTheme)
+    window.addEventListener('scenechange', handler)
+    return () => window.removeEventListener('scenechange', handler)
+  }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -39,6 +49,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-foreground">
+      <SceneBackground scene={scene} />
       <ToastProvider>
         <Routes>
           <Route path="/" element={<E><HomePage /></E>} />

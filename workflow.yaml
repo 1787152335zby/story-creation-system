@@ -22,19 +22,19 @@ phases:
     auto_skip: false
     split: true
 
-  - name: 分镜设计
-    agent: storyboarder
-    output: 04_分镜脚本/
-    condition: "story_type in ['1', '2', '3']"
-    auto_skip: false
-    split: true
-
   - name: 视觉提取
     agent: visual_extractor
-    output: 05_角色场景/
+    output: 04_角色场景/
     condition: true
     auto_skip: false
     split: false
+
+  - name: 分镜设计
+    agent: storyboarder
+    output: 05_分镜脚本/
+    condition: "story_type in ['1', '2', '3']"
+    auto_skip: false
+    split: true
 
   - name: 提示词生成
     agent: prompt_factory
@@ -42,15 +42,3 @@ phases:
     condition: "story_type in ['1', '2', '3']"
     auto_skip: false
     split: true
-
-  - name: 视觉素材
-    agent: image_artist
-    output: 07_视觉素材/
-    condition: false
-    auto_skip: true
-
-  - name: 视频生成
-    agent: video_producer
-    output: 08_视频/
-    condition: false
-    auto_skip: true

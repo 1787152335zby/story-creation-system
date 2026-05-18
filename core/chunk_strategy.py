@@ -38,12 +38,48 @@ class ChunkStrategy:
         }
         return plan_map.get(story_type, ChunkPlan(1, ["全部"], False, "", 0, False))
 
+    @staticmethod
+    def pre_analyze_split_points(outline: str, llm_stream_callable) -> list:
+        """预分析大纲的最佳分割点，返回分割点标签列表"""
+        if not outline or len(outline) < 500:
+            return None
+        prompt = (
+            "以下是一个故事大纲。请判断它最适合按什么结构分割。\n\n"
+            "如果故事有明确的幕/集/章标题，按原结构输出分割点。\n"
+            "如果故事没有明确标题，请分析故事情节中的自然断点（重大事件转折、时间跳转、场景切换），推荐分割方案。\n\n"
+            "输出格式：每行一个分割点，格式为「分割点N：标签名」。\n"
+            "只输出分割点列表，不要解释。\n\n"
+            f"{outline[:4000]}"
+        )
+        result = ""
+        for token in llm_stream_callable(prompt, "", temperature=0.3):
+            result += token
+        split_points = []
+        for line in result.strip().split("\n"):
+            line = line.strip()
+            if "：" in line:
+                label = line.split("：", 1)[1].strip()
+                split_points.append(label)
+            elif ":" in line:
+                label = line.split(":", 1)[1].strip()
+                split_points.append(label)
+        return split_points if len(split_points) >= 2 else None
+
 
 class ChunkIter:
-    def __init__(self, plan: ChunkPlan, outline: str):
+    def __init__(self, plan: ChunkPlan, outline: str, pre_analyzed: list = None):
         self.plan = plan
         if plan.chunk_count > 0:
             self.blocks = self._parse_fixed(outline, plan)
+            if not self.blocks and pre_analyzed:
+                per_chunk = len(outline) // len(pre_analyzed)
+                plan.chunk_count = len(pre_analyzed)
+                plan.chunk_names = pre_analyzed
+                self.blocks = []
+                for i, name in enumerate(pre_analyzed):
+                    start = i * per_chunk
+                    end = (i + 1) * per_chunk if i < len(pre_analyzed) - 1 else len(outline)
+                    self.blocks.append({"index": i, "name": name, "content": outline[start:end]})
         else:
             self.blocks = []
 

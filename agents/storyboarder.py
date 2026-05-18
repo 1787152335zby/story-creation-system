@@ -1,3 +1,4 @@
+import re
 from core.agent_base import AgentBase
 from core.project_manager import ProjectManager
 from core.style_config import StyleConfig, VISUAL_STYLES, SCREEN_ASPECTS
@@ -6,15 +7,100 @@ from tools.duration_validator import validate_storyboard_durations
 
 
 class Storyboarder(AgentBase):
-    def run(self, project: ProjectManager, style: StyleConfig, input_content: str) -> str:
-        result = "".join(self.run_stream(project, style, input_content))
+    def run(self, project: ProjectManager, style: StyleConfig, input_content: str,
+            visual_chars: list = None, visual_scenes: list = None) -> str:
+        result = "".join(self.run_stream(project, style, input_content, visual_chars, visual_scenes))
         validated = validate_storyboard_durations(result)
         if validated != result:
-            return validated + "\n\n> ⏱️ 注：部分镜头时长已自动校验修正（对白≥3s，缓慢运镜≥4s，全局≥2s）"
-        return validated
+            result = validated + "\n\n> ⏱️ 注：部分镜头时长已自动校验修正（对白≥3s，缓慢运镜≥4s，全局≥2s）"
+        report = self._validate_storyboard(result)
+        if report:
+            result += "\n\n---\n\n" + report
+        return result
 
-    def run_stream(self, project: ProjectManager, style: StyleConfig, input_content: str):
+    def _build_variant_table(self, visual_chars: list, visual_scenes: list) -> str:
+        """从视觉提取数据构建变体参考表，注入分镜 prompt"""
+        lines = ["【角色/场景变体参考表】"]
+        lines.append("以下角色和场景有多个形象变体。写分镜时请根据当前事件进度选择正确的变体名。\n")
+
+        bases = [c for c in visual_chars if c.get("is_base")] if visual_chars else []
+        for c in bases:
+            v_info = ""
+            if c.get("variants"):
+                v_lines = []
+                for v_name in c["variants"]:
+                    v_data = next((x for x in visual_chars if x["name"] == v_name), None)
+                    if v_data:
+                        change = v_data.get("appearance_change", "") or v_data.get("clothing_change", "")
+                        trigger = v_data.get("trigger_event", "")
+                        v_lines.append(f"    - {v_name}（{change[:40]}，触发：{trigger[:30]}）")
+                if v_lines:
+                    v_info = "\n" + "\n".join(v_lines)
+            lines.append(f"- {c['name']}{v_info}")
+
+        lines.append("")
+        scene_bases = [s for s in visual_scenes if s.get("is_base")] if visual_scenes else []
+        for s in scene_bases:
+            v_info = ""
+            if s.get("variants"):
+                v_lines = []
+                for v_name in s["variants"]:
+                    v_data = next((x for x in visual_scenes if x["name"] == v_name), None)
+                    if v_data:
+                        change = v_data.get("change", "")
+                        trigger = v_data.get("trigger_event", "")
+                        v_lines.append(f"    - {v_name}（{change[:40]}，触发：{trigger[:30]}）")
+                if v_lines:
+                    v_info = "\n" + "\n".join(v_lines)
+            lines.append(f"- {s['name']}{v_info}")
+
+        return "\n".join(lines)
+
+    def _validate_storyboard(self, content: str) -> str:
+        shot_count = len(re.findall(r'镜头\d{3}\s*\|', content))
+        char_entries = len(re.findall(r'出场角色：', content))
+        scene_entries = len(re.findall(r'场景：', content))
+        fade_in = len(re.findall(r'淡入', content))
+        fade_out = len(re.findall(r'淡出', content))
+        has_end_marker = '【全片完】' in content
+
+        issues = []
+        if shot_count == 0:
+            issues.append("未检测到符合格式的镜头")
+        if char_entries == 0:
+            issues.append("缺少「出场角色」字段")
+        if scene_entries == 0:
+            issues.append("缺少「场景」字段")
+        if not has_end_marker:
+            issues.append("缺少结束标记【全片完】")
+
+        header_pattern = re.compile(
+            r'镜头\d{3}\s*\|\s*[\d.]+s\s*\|\s*.+?\|\s*.+?\|\s*.+?\|\s*.+'
+        )
+        format_ok = bool(re.search(header_pattern, content))
+        if not format_ok:
+            issues.append("镜头格式不符合规范")
+
+        shot_total = max(shot_count, 1)
+        report = f"【分镜校验】\n"
+        report += f"- 镜头总数：{shot_count}\n"
+        report += f"- 有出场角色的镜头：{char_entries}/{shot_total}\n"
+        report += f"- 有场景标注的镜头：{scene_entries}/{shot_total}\n"
+        report += f"- 淡入标记：{fade_in} 处\n"
+        report += f"- 淡出标记：{fade_out} 处\n"
+        report += f"- 结束标记：{'✅' if has_end_marker else '❌'}\n"
+        report += f"- 格式规范：{'✅' if format_ok else '❌'}\n"
+        if issues:
+            report += f"- 问题：{'；'.join(issues)}\n"
+        return report
+
+    def run_stream(self, project: ProjectManager, style: StyleConfig, input_content: str,
+                   visual_chars: list = None, visual_scenes: list = None):
         template = self.load_prompt_template("storyboarder.txt")
+
+        # Inject variant reference table into prompt
+        variant_table = self._build_variant_table(visual_chars or [], visual_scenes or [])
+        template = template.replace("{variant_table}", variant_table)
 
         full_plot = input_content
         feedback = ""

@@ -22,8 +22,39 @@ class ScreenplayWriter(AgentBase):
     def run(self, project: ProjectManager, style: StyleConfig, input_content: str) -> str:
         return "".join(self.run_stream(project, style, input_content))
 
+    def _load_plot_meta(self, project: ProjectManager, input_content: str) -> dict:
+        """从剧情文件中提取版本方向、承诺清单、字数信息"""
+        meta = {
+            "confirmed_direction": "（未设置）",
+            "promise_list": "（未设置）",
+            "plot_chars": "0",
+            "max_script_chars": "0",
+        }
+        try:
+            plot_content = project.read_output("02_完整剧情/完整剧情.md") or input_content
+            total_chars = len(plot_content.replace(" ", "").replace("\n", ""))
+            meta["plot_chars"] = str(total_chars)
+            meta["max_script_chars"] = str(total_chars * 3)
+            # 提取方向信息
+            direction_match = re.search(r'> ✅ 已选中版本[AB]。(差异摘要.*?)$', plot_content, re.MULTILINE)
+            if direction_match:
+                meta["confirmed_direction"] = direction_match.group(1).strip()
+            # 提取承诺清单
+            promise_match = re.search(r'【本故事承诺】.*?(?=\n\n|\Z)', plot_content, re.DOTALL)
+            if promise_match:
+                meta["promise_list"] = promise_match.group(0).strip()
+        except:
+            pass
+        return meta
+
     def run_stream(self, project: ProjectManager, style: StyleConfig, input_content: str):
         template = self.load_prompt_template("screenplay_writer.txt")
+
+        meta = self._load_plot_meta(project, input_content)
+        template = template.replace("{confirmed_direction}", meta["confirmed_direction"])
+        template = template.replace("{promise_list}", meta["promise_list"])
+        template = template.replace("{plot_chars}", meta["plot_chars"])
+        template = template.replace("{max_script_chars}", meta["max_script_chars"])
 
         plot_structure = input_content
         feedback = ""

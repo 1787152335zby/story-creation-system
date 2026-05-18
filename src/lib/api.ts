@@ -106,8 +106,9 @@ export async function generateRandomIdea(style: StyleConfig): Promise<string> {
   return data.idea
 }
 
-export async function openProjectFolder(name: string): Promise<{ opened: boolean; path?: string }> {
-  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/open`, { method: 'POST' })
+export async function openProjectFolder(name: string, subfolder?: string): Promise<{ opened: boolean; path?: string }> {
+  const params = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/open${params}`, { method: 'POST' })
   return res.json()
 }
 

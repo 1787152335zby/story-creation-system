@@ -1,7 +1,7 @@
 import { ArrowLeft, Eye, ChevronDown, FolderOpen, Sparkles, RefreshCw } from 'lucide-react'
 
-const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成', '视觉素材', '视频生成']
-const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬', '🖼️', '🎥']
+const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成']
+const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬']
 
 interface PhaseData {
   done: boolean

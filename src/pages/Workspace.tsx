@@ -8,9 +8,9 @@ import PhaseTimeline from '../components/PhaseTimeline'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成', '视觉素材', '视频生成']
-const PHASE_DIRS = ['01_故事大纲', '02_完整剧情', '03_完整剧本', '04_分镜脚本', '05_角色场景', '06_提示词', '07_视觉素材', '08_视频']
-const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬', '🖼️', '🎥']
+const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成']
+const PHASE_DIRS = ['01_故事大纲', '02_完整剧情', '03_完整剧本', '04_分镜脚本', '05_角色场景', '06_提示词']
+const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬']
 
 export default function Workspace() {
   const { name } = useParams<{ name: string }>()
@@ -636,10 +636,6 @@ export default function Workspace() {
                   onChange={e => setEditText(e.target.value)}
                   autoFocus
                 />
-              ) : selectedPhase === 6 ? (
-                <VisualAssetGallery projectName={name || ''} />
-              ) : selectedPhase === 7 ? (
-                <VideoPlayer projectName={name || ''} />
               ) : (
                 <div className="prose prose-invert max-w-none">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewContent}</ReactMarkdown>
@@ -807,100 +803,3 @@ export default function Workspace() {
   )
 }
 
-function VisualAssetGallery({ projectName }: { projectName: string }) {
-  const [assets, setAssets] = useState<{ characters: { name: string; file: string }[]; scenes: { name: string; file: string }[] }>({ characters: [], scenes: [] })
-  const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const { getMediaUrl } = window as any
-
-  useEffect(() => {
-    if (projectName) {
-      import('../lib/api').then(api => api.fetchVisualAssets(projectName).then(setAssets))
-    }
-  }, [projectName])
-
-  const mediaUrl = (subpath: string) => `/api/projects/${encodeURIComponent(projectName)}/media/${encodeURIComponent(subpath)}`
-
-  return (
-    <div>
-      {assets.characters.length > 0 && (
-        <div className="mb-8">
-          <h4 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">🧑 角色定妆照</h4>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {assets.characters.map((c: any) => (
-              <div key={c.file} className="glass-card rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                onClick={() => setSelectedImage(mediaUrl(`07_视觉素材/角色/${c.file}`))}>
-                <img src={mediaUrl(`07_视觉素材/角色/${c.file}`)} alt={c.name} className="w-full h-64 object-contain bg-white" />
-                <p className="text-xs text-center py-2 text-muted-foreground">{c.name.replace('_四视图', '')}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {assets.scenes.length > 0 && (
-        <div>
-          <h4 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">🌆 场景概念图</h4>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {assets.scenes.map((s: any) => (
-              <div key={s.file} className="glass-card rounded-xl overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                onClick={() => setSelectedImage(mediaUrl(`07_视觉素材/场景/${s.file}`))}>
-                <img src={mediaUrl(`07_视觉素材/场景/${s.file}`)} alt={s.name} className="w-full h-64 object-cover" />
-                <p className="text-xs text-center py-2 text-muted-foreground">{s.name}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {assets.characters.length === 0 && assets.scenes.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-12">🖼️ 暂无视觉素材，完成「视觉提取」阶段后自动生成</p>
-      )}
-      {selectedImage && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8" onClick={() => setSelectedImage(null)}>
-          <img src={selectedImage} className="max-w-full max-h-full object-contain" />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function VideoPlayer({ projectName }: { projectName: string }) {
-  const [clips, setClips] = useState<{ name: string; file: string }[]>([])
-  const [finalClip, setFinalClip] = useState<{ name: string; file: string } | null>(null)
-
-  useEffect(() => {
-    if (projectName) {
-      import('../lib/api').then(api => api.fetchVideoClips(projectName).then(data => {
-        setClips(data.clips)
-        setFinalClip(data.final)
-      }))
-    }
-  }, [projectName])
-
-  const mediaUrl = (subpath: string) => `/api/projects/${encodeURIComponent(projectName)}/media/${encodeURIComponent(subpath)}`
-
-  return (
-    <div>
-      {finalClip && (
-        <div className="mb-8">
-          <h4 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">▶️ 成片</h4>
-          <video src={mediaUrl(finalClip.file)} controls className="w-full max-w-2xl rounded-xl" style={{ maxHeight: '500px' }} />
-        </div>
-      )}
-      {clips.length > 0 && (
-        <div>
-          <h4 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">🎬 视频片段</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {clips.map((clip) => (
-              <div key={clip.file} className="glass-card rounded-xl overflow-hidden">
-                <video src={mediaUrl(clip.file)} controls className="w-full" style={{ maxHeight: '300px' }} preload="metadata" />
-                <p className="text-xs text-center py-2 text-muted-foreground">{clip.name}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {clips.length === 0 && !finalClip && (
-        <p className="text-sm text-muted-foreground text-center py-12">🎥 暂无视频片段，完成「视频生成」阶段后自动生成</p>
-      )}
-    </div>
-  )
-}

@@ -161,13 +161,16 @@ def random_story_idea(style: StyleConfigRequest):
 
 
 @router.post("/projects/{name}/open")
-def open_project_folder(name: str):
+def open_project_folder(name: str, subfolder: str = ""):
     project_dir = PROJECTS_DIR / name
     if not project_dir.exists():
         raise HTTPException(status_code=404, detail="项目不存在")
+    target = project_dir / subfolder if subfolder else project_dir
+    if subfolder and not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
     try:
-        subprocess.Popen(["explorer", str(project_dir)])
-        return {"opened": True, "path": str(project_dir)}
+        subprocess.Popen(["explorer", str(target)])
+        return {"opened": True, "path": str(target)}
     except Exception as e:
         return {"opened": False, "error": str(e)}
 
@@ -235,6 +238,22 @@ def list_characters(name: str):
     from core.project_manager import ProjectManager
     project = ProjectManager(name)
     return VisualBibleExtractor.list_characters(project)
+
+
+@router.get("/projects/{name}/characters/{char_name}/variants")
+def list_character_variants(name: str, char_name: str):
+    from core.visual_bible import VisualBibleExtractor
+    from core.project_manager import ProjectManager
+    project = ProjectManager(name)
+    return VisualBibleExtractor.list_variants(project, char_name)
+
+
+@router.get("/projects/{name}/scenes/{scene_name}/variants")
+def list_scene_variants(name: str, scene_name: str):
+    from core.visual_bible import VisualBibleExtractor
+    from core.project_manager import ProjectManager
+    project = ProjectManager(name)
+    return VisualBibleExtractor.list_scene_variants(project, scene_name)
 
 
 @router.get("/projects/{name}/scenes")

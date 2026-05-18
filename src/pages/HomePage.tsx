@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Settings, Film, FolderOpen, Trash2, AlertTriangle, Image, Video, BookText, Sparkles, Search } from 'lucide-react'
-import { fetchProjects, deleteProject, openProjectFolder, fetchSettings, fetchTemplates, deleteTemplate } from '../lib/api'
+import { Plus, Settings, Film, FolderOpen, Trash2, AlertTriangle, Image, Video, BookText, Sparkles, Search, Loader2 } from 'lucide-react'
+import { fetchProjects, deleteProject, openProjectFolder, fetchSettings, fetchTemplates, deleteTemplate, fetchProjectImages, fetchVideoClips } from '../lib/api'
 import { useToast } from '../components/Toast'
 import type { ProjectInfo, Template } from '../lib/types'
 
-const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '提示词']
+const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜设计', '视觉提取', '提示词生成']
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -20,6 +20,10 @@ export default function HomePage() {
   const [showAllTemplates, setShowAllTemplates] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'progress' | 'done'>('all')
+  const [activeProjectTab, setActiveProjectTab] = useState<Record<string, 'text' | 'images' | 'videos'>>({})
+  const [cachedImages, setCachedImages] = useState<Record<string, any>>({})
+  const [cachedClips, setCachedClips] = useState<Record<string, any>>({})
+  const [loadingTab, setLoadingTab] = useState<Record<string, boolean>>({})
 
   const filteredProjects = useMemo(() => {
     let list = projects
@@ -29,15 +33,13 @@ export default function HomePage() {
     }
     if (statusFilter === 'progress') {
       list = list.filter((p: ProjectInfo) => {
-        const done = (p.phases || []).filter((ph: any) => ph.done).length
-        const total = p.total_phases || p.phases?.length || 5
-        return done > 0 && done < total
+        const done = (p.phases || []).slice(0, PHASE_NAMES.length).filter((ph: any) => ph.done).length
+        return done > 0 && done < PHASE_NAMES.length
       })
     } else if (statusFilter === 'done') {
       list = list.filter((p: ProjectInfo) => {
-        const done = (p.phases || []).filter((ph: any) => ph.done).length
-        const total = p.total_phases || p.phases?.length || 5
-        return done >= total
+        const done = (p.phases || []).slice(0, PHASE_NAMES.length).filter((ph: any) => ph.done).length
+        return done >= PHASE_NAMES.length
       })
     }
     return list
@@ -86,17 +88,17 @@ export default function HomePage() {
     { icon: BookText, label: '剧本目录', desc: '浏览已有项目 · 继续创作 · 管理剧本文件', color: 'hsl(40, 90%, 55%)', path: null },
   ]
 
+  const doneProjects = projects.filter(p => {
+    const d = (p.phases || []).slice(0, PHASE_NAMES.length).filter((ph: any) => ph.done).length
+    return d >= PHASE_NAMES.length
+  }).length
+
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, hsl(var(--primary)), transparent 70%)' }} />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, hsl(var(--accent)), transparent 70%)' }} />
-      </div>
 
       <div className="max-w-6xl mx-auto px-6 py-10 relative z-10">
-        <header className="flex items-center justify-between mb-10 animate-fade-in">
+        {/* Header */}
+        <header className="flex items-center justify-between mb-8 animate-fade-in">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center animate-pulse-glow"
               style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }}>
@@ -109,11 +111,14 @@ export default function HomePage() {
               <p className="text-xs text-muted-foreground mt-0.5">AI 驱动的全流程创作平台</p>
             </div>
           </div>
-          <button onClick={() => navigate('/settings')} className="relative p-3 rounded-xl hover:bg-muted transition-all hover:scale-105 group" title="设置">
-            <Settings className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/settings')} className="relative p-3 rounded-xl hover:bg-white/5 transition-all hover:scale-105 group" title="设置">
+              <Settings className="w-5 h-5 text-white/50 group-hover:text-white/80 transition-colors" />
+            </button>
+          </div>
         </header>
 
+        {/* Setup prompt */}
         {showSetupPrompt && (
           <div className="mb-8 p-5 rounded-2xl border-2 border-amber-400/30 bg-amber-400/5 animate-fade-in-up flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -134,18 +139,59 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Entry cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+        {/* === Hero Section === */}
+        <div className="relative overflow-hidden rounded-2xl p-8 mb-8 animate-fade-in-up"
+          style={{
+            background: 'linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--accent) / 0.05))',
+            border: '1px solid hsl(var(--primary) / 0.12)',
+          }}>
+          <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full opacity-30 pointer-events-none"
+            style={{ background: 'radial-gradient(circle, hsl(var(--primary) / 0.2), transparent 70%)' }} />
+          <div className="relative">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium mb-4"
+              style={{ background: 'hsl(var(--primary) / 0.12)', color: 'hsl(var(--primary))', border: '1px solid hsl(var(--primary) / 0.2)' }}>
+              <Sparkles className="w-3 h-3" /> AI 驱动全流程
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-3">从灵感到银幕</h2>
+            <p className="text-sm text-muted-foreground max-w-lg leading-relaxed mb-6">
+              输入一句话故事想法，AI 全自动完成大纲、剧情、剧本、分镜到提示词。让创作回归创意本身。
+            </p>
+            <button onClick={() => navigate('/new')}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105 active:scale-95"
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }}>
+              <Sparkles className="w-4 h-4" /> 开始创作
+            </button>
+            {!loading && (
+              <div className="flex gap-8 mt-6 pt-5 border-t border-border/40">
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'hsl(var(--primary))' }}>{projects.length}</div>
+                  <div className="text-[10px] text-muted-foreground">已完成项目</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'hsl(var(--primary))' }}>{doneProjects}</div>
+                  <div className="text-[10px] text-muted-foreground">创作环节</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold" style={{ color: 'hsl(var(--primary))' }}>∞</div>
+                  <div className="text-[10px] text-muted-foreground">AI 模型支持</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* === Tool Cards === */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
           {entries.map((entry, idx) => (
             <div
               key={entry.label}
               onClick={() => entry.path && navigate(entry.path)}
               className={`glass-card rounded-2xl p-6 animate-fade-in-up transition-all duration-300 ${
-                entry.path ? 'card-hover cursor-pointer' : ''
+                entry.path ? 'card-hover cursor-pointer hover:-translate-y-1' : ''
               } ${!entry.path ? 'ring-2 ring-primary/20' : ''}`}
               style={{ animationDelay: `${idx * 0.08}s`, opacity: 0 }}
             >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
                 style={{ background: `${entry.color}20`, color: entry.color }}>
                 <entry.icon className="w-5 h-5" />
               </div>
@@ -155,41 +201,39 @@ export default function HomePage() {
           ))}
         </div>
 
-        {/* Project list = 剧本目录 */}
+        {/* === Project List === */}
         <div className="animate-fade-in-up" style={{ animationDelay: '0.35s', opacity: 0 }}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <BookText className="w-5 h-5 text-muted-foreground" />
-              <span>剧本目录</span>
-              {!loading && <span className="text-xs text-muted-foreground font-normal">({filteredProjects.length}/{projects.length} 个项目)</span>}
-            </h2>
-            {!loading && (
-              <button onClick={() => navigate('/new')} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium">
-                <Plus className="w-3.5 h-3.5" /> 新建
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 mb-5">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <input value={searchText} onChange={e => { setSearchText(e.target.value); setShowAllProjects(true) }}
-                placeholder="搜索项目名称..."
-                className="w-full bg-muted border border-border rounded-xl pl-9 pr-3 py-2 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors" />
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold">📂 最近项目</h2>
+              {!loading && <span className="text-[10px] text-muted-foreground">({filteredProjects.length}/{projects.length})</span>}
             </div>
-            <div className="flex items-center gap-1 bg-muted/50 rounded-xl p-0.5 border border-border/50">
-              {[
-                { key: 'all', label: '全部' },
-                { key: 'progress', label: '进行中' },
-                { key: 'done', label: '已完成' },
-              ].map(f => (
-                <button key={f.key} onClick={() => setStatusFilter(f.key as any)}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-                    statusFilter === f.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
-                  }`}>
-                  {f.label}
+            <div className="flex items-center gap-2">
+              <div className="relative max-w-[180px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                <input value={searchText} onChange={e => { setSearchText(e.target.value); setShowAllProjects(true) }}
+                  placeholder="搜索项目..."
+                  className="w-full bg-muted border border-border rounded-lg pl-7 pr-2.5 py-1.5 text-[11px] placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors" />
+              </div>
+              <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5 border border-border/50">
+                {[
+                  { key: 'all', label: '全部' },
+                  { key: 'progress', label: '进行中' },
+                  { key: 'done', label: '已完成' },
+                ].map(f => (
+                  <button key={f.key} onClick={() => setStatusFilter(f.key as any)}
+                    className={`px-2.5 py-1 rounded text-[10px] font-medium transition-all ${
+                      statusFilter === f.key ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    }`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              {!loading && (
+                <button onClick={() => navigate('/new')} className="btn-gradient inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium flex-shrink-0">
+                  <Plus className="w-3 h-3" /> 新建
                 </button>
-              ))}
+              )}
             </div>
           </div>
 
@@ -209,7 +253,7 @@ export default function HomePage() {
             </div>
           ) : filteredProjects.length === 0 ? (
             <div className="glass-card rounded-2xl p-12 text-center">
-              <div className="empty-icon"><BookText className="w-5 h-5 text-muted-foreground" /></div>
+              <BookText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/40" />
               {searchText || statusFilter !== 'all' ? (
                 <div>
                   <p className="font-medium text-sm mb-1">没有找到匹配的项目</p>
@@ -218,7 +262,7 @@ export default function HomePage() {
               ) : (
                 <div>
                   <p className="font-medium text-sm mb-1">开始你的第一个项目吧</p>
-                  <p className="text-muted-foreground text-xs">点击右上角「新建项目」，AI 会帮你完成从大纲到提示词的全部创作</p>
+                  <p className="text-muted-foreground text-xs">点击下方按钮，AI 会帮你完成从大纲到提示词的全部创作</p>
                   <button onClick={() => navigate('/new')} className="btn-gradient px-5 py-2.5 rounded-xl text-sm font-medium mt-5 inline-flex items-center gap-1.5">
                     <Plus className="w-4 h-4" /> 新建项目
                   </button>
@@ -229,43 +273,196 @@ export default function HomePage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(showAllProjects ? filteredProjects : filteredProjects.slice(0, 6)).map((p, idx) => {
-                const done = (p.phases || []).filter((ph: any) => ph.done).length
-                const total = p.total_phases || p.phases?.length || 5
+                const phases = (p.phases || []).slice(0, PHASE_NAMES.length)
+                const done = phases.filter((ph: any) => ph.done).length
+                const total = PHASE_NAMES.length
                 const pct = total > 0 ? (done / total) * 100 : 0
+                const tab = activeProjectTab[p.name] || 'text'
+                const imgs = cachedImages[p.name]
+                const clips = cachedClips[p.name]
+                const loading = loadingTab[p.name]
+                const handleTab = (t: 'text' | 'images' | 'videos', e: React.MouseEvent) => {
+                  e.stopPropagation()
+                  setActiveProjectTab(prev => ({ ...prev, [p.name]: t }))
+                  if (t === 'images' && !imgs && !loading) {
+                    setLoadingTab(prev => ({ ...prev, [p.name]: true }))
+                    fetchProjectImages(p.name).then(data => {
+                      setCachedImages(prev => ({ ...prev, [p.name]: data }))
+                    }).catch(() => {}).finally(() => {
+                      setLoadingTab(prev => ({ ...prev, [p.name]: false }))
+                    })
+                  }
+                  if (t === 'videos' && !clips && !loading) {
+                    setLoadingTab(prev => ({ ...prev, [p.name]: true }))
+                    fetchVideoClips(p.name).then(data => {
+                      setCachedClips(prev => ({ ...prev, [p.name]: data }))
+                    }).catch(() => {}).finally(() => {
+                      setLoadingTab(prev => ({ ...prev, [p.name]: false }))
+                    })
+                  }
+                }
                 return (
-                  <div key={p.name} onClick={() => navigate(`/project/${encodeURIComponent(p.name)}`)}
-                    className="glass-card rounded-2xl p-5 cursor-pointer group card-glow">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{p.name}</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5">{p.genre || '未分类'} · {p.updated_at?.slice(0, 10)}</p>
-                      </div>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={(e) => { e.stopPropagation(); openProjectFolder(p.name) }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground" title="打开文件夹">
-                          <FolderOpen className="w-3.5 h-3.5" />
+                  <div key={p.name}
+                    className="glass-card rounded-2xl overflow-hidden group card-glow transition-all duration-200">
+                    {/* Tab buttons */}
+                    <div className="flex border-b border-border/40">
+                      {[
+                        { key: 'text' as const, icon: '📝', label: '文本' },
+                        { key: 'images' as const, icon: '🎨', label: '生图' },
+                        { key: 'videos' as const, icon: '🎬', label: '视频' },
+                      ].map(t => (
+                        <button key={t.key} onClick={(e) => handleTab(t.key, e)}
+                          className={`flex-1 text-[10px] py-2.5 font-medium transition-all ${
+                            tab === t.key
+                              ? 'bg-primary/10 text-primary border-b-2 border-primary'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                          }`}>
+                          {t.icon} {t.label}
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(p.name) }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-400" title="删除">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mb-3">
-                      {PHASE_NAMES.map((pn, i) => (
-                        <span key={i} className={`badge ${
-                          (p.phases || [])[i]?.done ? 'badge-primary' : 'badge-muted'
-                        }`}>{pn}</span>
                       ))}
                     </div>
-                    <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700 progress-glow" style={{
-                        width: `${pct}%`,
-                        background: pct === 100 ? 'linear-gradient(90deg, hsl(var(--accent)), hsl(150, 60%, 50%))' : 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))',
-                      }} />
-                    </div>
-                    <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground">
-                      <span>{done}/{total} 阶段</span>
-                      <span>{pct === 100 ? '已完成' : `${Math.round(pct)}%`}</span>
-                    </div>
+
+                    {tab === 'text' && (
+                      <div className="p-4 cursor-pointer" onClick={() => navigate(`/project/${encodeURIComponent(p.name)}`)}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{p.name}</h3>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{p.genre || '未分类'} · {p.updated_at?.slice(0, 10)}</p>
+                          </div>
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                            <button onClick={(e) => { e.stopPropagation(); openProjectFolder(p.name) }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground" title="打开文件夹">
+                              <FolderOpen className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(p.name) }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-400" title="删除">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {PHASE_NAMES.map((pn, i) => (
+                            <span key={i} className={`badge ${
+                              (p.phases || [])[i]?.done ? 'badge-primary' : 'badge-muted'
+                            }`}>{pn}</span>
+                          ))}
+                        </div>
+                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700 progress-glow" style={{
+                            width: `${pct}%`,
+                            background: pct === 100 ? 'linear-gradient(90deg, hsl(var(--accent)), hsl(150, 60%, 50%))' : 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))',
+                          }} />
+                        </div>
+                        <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground">
+                          <span>{done}/{total} 阶段</span>
+                          <span>{pct === 100 ? '已完成' : `${Math.round(pct)}%`}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {tab === 'images' && (
+                      <div className="p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <h3 className="font-semibold text-sm truncate">{p.name}</h3>
+                          <div className="flex items-center gap-0.5">
+                            <button onClick={(e) => { e.stopPropagation(); openProjectFolder(p.name, '05_角色场景') }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground" title="打开图片文件夹">
+                              <FolderOpen className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(p.name) }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-400" title="删除">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        {loading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : imgs ? (
+                          <>
+                            {Object.keys(imgs.characters).length > 0 && (
+                              <div className="mb-2">
+                                <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">角色</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {Object.entries(imgs.characters).map(([name, data]: [string, any]) => {
+                                    const entities = Array.isArray(data) ? data : (data.images || [])
+                                    return entities.length > 0 ? (
+                                      <div key={name} className="text-center">
+                                        <img key={name} src={entities[0].url} alt={name}
+                                          className="w-12 h-12 rounded-lg object-cover border border-border/40 cursor-pointer"
+                                          onClick={() => navigate(`/project/${encodeURIComponent(p.name)}`)} />
+                                        <p className="text-[8px] text-muted-foreground mt-0.5 truncate max-w-[48px]">{name}</p>
+                                      </div>
+                                    ) : null
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                            {Object.keys(imgs.scenes).length > 0 && (
+                              <div>
+                                <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">场景</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {Object.entries(imgs.scenes).map(([name, data]: [string, any]) => {
+                                    const entities = Array.isArray(data) ? data : (data.images || [])
+                                    return entities.length > 0 ? (
+                                      <div key={name} className="text-center">
+                                        <img key={name} src={entities[0].url} alt={name}
+                                          className="w-12 h-12 rounded-lg object-cover border border-border/40 cursor-pointer"
+                                          onClick={() => navigate(`/project/${encodeURIComponent(p.name)}`)} />
+                                        <p className="text-[8px] text-muted-foreground mt-0.5 truncate max-w-[48px]">{name}</p>
+                                      </div>
+                                    ) : null
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                            {(Object.keys(imgs.characters).length === 0 && Object.keys(imgs.scenes).length === 0) && (
+                              <p className="text-xs text-muted-foreground text-center py-6">暂无生成图片</p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-xs text-muted-foreground text-center py-6">点击加载图片数据</p>
+                        )}
+                      </div>
+                    )}
+
+                    {tab === 'videos' && (
+                      <div className="p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <h3 className="font-semibold text-sm truncate">{p.name}</h3>
+                          <div className="flex items-center gap-0.5">
+                            <button onClick={(e) => { e.stopPropagation(); openProjectFolder(p.name, '08_视频') }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground" title="打开视频文件夹">
+                              <FolderOpen className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(p.name) }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-400" title="删除">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        {loading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : clips ? (
+                          <div className="space-y-1.5">
+                            {clips.final && (
+                              <div className="flex items-center gap-2 p-2 rounded-lg bg-green-400/5 border border-green-400/20">
+                                <span className="text-[9px] text-green-400 font-medium">最终</span>
+                                <span className="text-xs truncate flex-1">{clips.final.name}</span>
+                                <button onClick={() => navigate(`/video-gen`)} className="text-[9px] text-primary hover:underline">查看</button>
+                              </div>
+                            )}
+                            {clips.clips?.length > 0 ? clips.clips.slice(0, 4).map((clip: any, i: number) => (
+                              <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30">
+                                <span className="text-[10px] text-muted-foreground w-4">{i + 1}</span>
+                                <span className="text-xs truncate flex-1">{clip.name}</span>
+                              </div>
+                            )) : (
+                              <p className="text-xs text-muted-foreground text-center py-6">暂无视频片段</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground text-center py-6">点击加载视频数据</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -286,10 +483,10 @@ export default function HomePage() {
         {templates.length > 0 && (
           <div className="mt-10 animate-fade-in-up" style={{ animationDelay: '0.45s', opacity: 0 }}>
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-muted-foreground" />
+              <h2 className="text-base font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-muted-foreground" />
                 <span>创作模板</span>
-                <span className="text-xs text-muted-foreground font-normal">({templates.length} 个)</span>
+                <span className="text-[10px] text-muted-foreground font-normal">({templates.length} 个)</span>
               </h2>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -324,7 +521,6 @@ export default function HomePage() {
             )}
           </div>
         )}
-
       </div>
 
       {/* Delete template confirm modal */}
@@ -353,7 +549,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Delete confirm modal */}
+      {/* Delete project confirm modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
           <div className="glass-card rounded-2xl p-6 w-full max-w-sm mx-4" onClick={e => e.stopPropagation()}>
