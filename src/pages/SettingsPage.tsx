@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Loader2, Lock, ExternalLink, Zap, Settings, Check, Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, Lock, ExternalLink, Zap, Settings, Check, Eye, EyeOff, Plus, Trash2, RefreshCw } from 'lucide-react'
 import { fetchSettings, updateSettings, testLLM, fetchAggConfigs, createAggConfig, updateAggConfig, deleteAggConfig, activateAggConfig, deactivateAggType, testAggConfig, fetchAggConfigModels, fetchProviderConfigs, createProviderConfig, updateProviderConfig, deleteProviderConfig, activateProviderConfig } from '../lib/api'
 import type { AggConfig, ProviderConfig, ModelFamily } from '../lib/api'
 import ModelSelector from '../components/ModelSelector'
@@ -77,25 +77,41 @@ export default function SettingsPage() {
 
   const typeKey = activeTab === 0 ? 'llm' : activeTab === 1 ? 'image' : 'video'
 
-  useEffect(() => {
-    fetchAggConfigs(typeKey).then(data => {
-      const configs = data.configs || []
-      setAggConfigs(configs)
-      // 为每个配置加载专属模型列表
-      for (const cfg of configs) {
-        if (cfg.id && cfg.base_url && cfg.api_key) {
-          setAggLoadingModels(p => ({ ...p, [cfg.id]: true }))
-          fetchAggConfigModels(cfg.id).then(({ families }) => {
-            setAggFamilies(p => ({ ...p, [cfg.id]: families }))
-            setAggLoadingModels(p => ({ ...p, [cfg.id]: false }))
-            // 自动默认选中第一个家族
-            if (families.length > 0 && !aggSelectedFamily[cfg.id]) {
-              setAggSelectedFamily(p => ({ ...p, [cfg.id]: families[0].id }))
+  const loadAggModels = async (configs: any[]) => {
+    for (const cfg of configs) {
+      if (cfg.id && cfg.base_url && cfg.api_key) {
+        setAggLoadingModels(p => ({ ...p, [cfg.id]: true }))
+        try {
+          const { families } = await fetchAggConfigModels(cfg.id)
+          setAggFamilies(p => ({ ...p, [cfg.id]: families }))
+          if (families.length > 0) {
+            // 根据已保存的模型找到正确的家族
+            let targetFamily = families[0].id
+            if (cfg.model) {
+              for (const f of families) {
+                if (f.versions.some(v => v.value === cfg.model)) {
+                  targetFamily = f.id
+                  break
+                }
+              }
             }
-          })
-        }
+            setAggSelectedFamily(p => ({ ...p, [cfg.id]: targetFamily }))
+          }
+        } catch { /* ignore */ }
+        setAggLoadingModels(p => ({ ...p, [cfg.id]: false }))
       }
-    })
+    }
+  }
+
+  const fetchAggConfigsAndModels = async () => {
+    const data = await fetchAggConfigs(typeKey)
+    const configs = data.configs || []
+    setAggConfigs(configs)
+    loadAggModels(configs)
+  }
+
+  useEffect(() => {
+    fetchAggConfigsAndModels()
     const provId = activeTab === 0 ? 'deepseek' : activeTab === 1 ? 'seedream' : 'seedance'
     fetchProviderConfigs(provId).then(d => setProviderConfigMap(prev => ({ ...prev, [provId]: d.configs })))
   }, [activeTab])
@@ -137,7 +153,7 @@ export default function SettingsPage() {
     setEnvSettings(prev => ({ ...prev, ...payload }))
     const aggType = groupIdx === 0 ? 'llm' : groupIdx === 1 ? 'image' : 'video'
     await deactivateAggType(aggType)
-    fetchAggConfigs(typeKey).then(d => setAggConfigs(d.configs || []))
+    fetchAggConfigsAndModels()
     toast(`已切换至 ${p.label}`, 'success')
   }
 
@@ -186,7 +202,7 @@ export default function SettingsPage() {
         {/* Tabs */}
         <div className="glass-card rounded-2xl p-1.5 mb-8 flex animate-fade-in-up">
           {GROUPS.map((g, i) => (
-            <button key={g.name} onClick={() => { setActiveTab(i); setTestResult(null); setAggTestResult(null) }}
+            <button key={g.name} onClick={() => { setActiveTab(i); setTestResult(null); setAggTestResultSet({}) }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
                 activeTab === i ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}>
@@ -225,8 +241,14 @@ export default function SettingsPage() {
                     </div>
 
                     {active && <p className="text-[10px] text-primary font-semibold mb-2">● 当前使用</p>}
-                    {configured && model && (
-                      <p className="text-[10px] text-muted-foreground font-mono truncate mb-2">模型: {model}</p>
+
+                    {p.models.length > 0 && (
+                      <div className="mb-2">
+                        <select value={model} onChange={e => p.model_field && update(p.model_field, e.target.value)}
+                          className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs">
+                          {p.models.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </div>
                     )}
 
                     <div className="flex items-center gap-1.5 mt-1">
@@ -234,7 +256,7 @@ export default function SettingsPage() {
                         className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border transition-all ${
                           isExpanded ? 'bg-primary/15 text-primary border-primary/30' : 'border-border hover:border-primary/30 text-muted-foreground'
                         }`}>
-                        <Settings className="w-3 h-3" /> {isExpanded ? '收起' : '配置'}
+                        <Settings className="w-3 h-3" /> {isExpanded ? '收起' : 'API Key'}
                       </button>
                       {configured && (
                         active ? (
@@ -247,6 +269,13 @@ export default function SettingsPage() {
                             <Check className="w-3 h-3" /> 使用
                           </button>
                         )
+                      )}
+                      {p.test_backend && (
+                        <button onClick={() => handleTest(p)} disabled={testing}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background disabled:opacity-40 transition-colors ml-auto">
+                          {testing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
+                          测试
+                        </button>
                       )}
                     </div>
                   </div>
@@ -281,33 +310,7 @@ export default function SettingsPage() {
                         )}
                       </div>
 
-                      {p.models.length > 0 && (
-                        <div>
-                          <label className="text-[9px] text-muted-foreground mb-0.5 block">模型</label>
-                          <select value={model} onChange={e => p.model_field && update(p.model_field, e.target.value)}
-                            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs">
-                            {p.models.map(m => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                        </div>
-                      )}
-
-                      {p.id === 'custom' && (
-                        <div>
-                          <label className="text-[9px] text-muted-foreground mb-0.5 block">模型（可手动输入）</label>
-                          <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono"
-                            value={val('custom_image_model')} onChange={e => update('custom_image_model', e.target.value)}
-                            placeholder="gpt-image-1 / flux-pro / sdxl ..." />
-                        </div>
-                      )}
-
                       <div className="flex items-center gap-1.5 pt-0.5">
-                        {p.test_backend && (
-                          <button onClick={() => handleTest(p)} disabled={testing}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background disabled:opacity-40 transition-colors">
-                            {testing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
-                            测试
-                          </button>
-                        )}
                         <button onClick={() => quickSave(p, activeTab)}
                           className="btn-gradient flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium disabled:opacity-50">
                           <Save className="w-2.5 h-2.5" /> 保存
@@ -426,88 +429,145 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
 
             {/* 聚合平台配置 — 每个独立卡片 */}
-            {aggConfigs.map(cfg => (
+            {aggConfigs.map(cfg => {
+              const isEditing = editingAggId === cfg.id
+              const keyHint = cfg.api_key?.length > 8 ? `...${cfg.api_key.slice(-8)}` : '已配置'
+              return (
               <div key={cfg.id} className={`glass-card rounded-2xl overflow-hidden transition-all duration-300 ${cfg.active ? 'ring-2 ring-primary/40' : ''}`}>
-                <div className="p-5">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-sm flex items-center gap-1.5">
-                        🌐 {cfg.name}
-                        {cfg.active && <span className="text-[10px] text-primary font-semibold">● 当前</span>}
-                      </h3>
-                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">{cfg.base_url}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 mt-3">
-                    <div className="relative">
-                      <Lock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                      <input type={visibleAggKey === cfg.id ? 'text' : 'password'} className="w-full bg-background border border-border rounded-lg pl-8 pr-8 py-2 text-xs font-mono"
-                        value={cfg.api_key || ''} readOnly />
-                      <button type="button" onClick={() => setVisibleAggKey(visibleAggKey === cfg.id ? null : cfg.id)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
-                        {visibleAggKey === cfg.id ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-muted-foreground mb-0.5 block">{grp.icon} {grp.name} 模型</label>
-                      <div className="flex items-center gap-2">
-                        <select value={aggSelectedFamily[cfg.id] || ''} onChange={e => {
-                          setAggSelectedFamily(p => ({ ...p, [cfg.id]: e.target.value }))
-                        }}
-                          className="flex-1 bg-background border border-border rounded-lg px-2 py-2 text-[10px] appearance-none min-w-0">
-                          {(aggFamilies[cfg.id] || []).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                        </select>
-                        <select value={cfg.model || ''} onChange={async e => {
-                          await updateAggConfig(cfg.id, { model: e.target.value })
-                          fetchAggConfigs(typeKey).then(d => setAggConfigs(d.configs || []))
-                        }}
-                          className="flex-1 bg-background border border-border rounded-lg px-2 py-2 text-[10px] appearance-none min-w-0">
-                          {!cfg.model && <option value="">-- 版本 --</option>}
-                          {(() => {
-                            const family = (aggFamilies[cfg.id] || []).find(f => f.id === aggSelectedFamily[cfg.id])
-                            return (family?.versions || []).map(v => <option key={v.value} value={v.value}>{v.label}</option>)
-                          })()}
-                        </select>
-                        {aggLoadingModels[cfg.id] && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground flex-shrink-0" />}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 pt-1">
-                       <button onClick={async () => {
-                         setAggTestingSet(p => ({ ...p, [cfg.id]: true }))
-                         const r = await testAggConfig({ base_url: cfg.base_url, api_key: cfg.api_key })
-                         setAggTestResultSet(p => ({ ...p, [cfg.id]: r }))
-                         setAggTestingSet(p => ({ ...p, [cfg.id]: false }))
-                       }} disabled={aggTestingSet[cfg.id]}
-                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background disabled:opacity-40 transition-colors">
-                         {aggTestingSet[cfg.id] ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
-                         测试
-                       </button>
-                       {cfg.active ? (
-                         <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium text-primary border border-primary/30 bg-primary/10">
-                           <Check className="w-3 h-3" /> 使用中
-                         </span>
-                       ) : (
-                         <button onClick={() => { activateAggConfig(cfg.id).then(() => fetchAggConfigs(typeKey).then(d => setAggConfigs(d.configs || []))) }}
-                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-accent/30 text-[10px] text-accent hover:bg-accent/10 transition-colors">
-                           <Check className="w-3 h-3" /> 使用
-                         </button>
-                       )}
-                       <button onClick={() => { if (!confirm('确定删除这个聚合平台配置？')) return; deleteAggConfig(cfg.id).then(() => fetchAggConfigs(typeKey).then(d => setAggConfigs(d.configs || []))) }}
-                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-400/30 text-[10px] text-red-400 hover:bg-red-400/10 transition-colors ml-auto">
-                         <Trash2 className="w-3 h-3" /> 删除
-                       </button>
-                    </div>
-                    {aggTestResultSet[cfg.id] && (
-                      <div className={`flex items-center gap-1.5 p-2 rounded-lg text-[10px] ${aggTestResultSet[cfg.id].success ? 'bg-green-400/5 border border-green-400/20' : 'bg-red-400/5 border border-red-400/20'}`}>
-                        <span>{aggTestResultSet[cfg.id].success ? '✅' : '❌'}</span>
-                        <span className={aggTestResultSet[cfg.id].success ? 'text-green-400' : 'text-red-400'}>{aggTestResultSet[cfg.id].message || aggTestResultSet[cfg.id].error}</span>
+                <div className="p-4">
+                  {/* Header */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm">🌐</span>
+                    {isEditing ? (
+                      <input className="flex-1 bg-background border border-border rounded-lg px-2 py-1 text-xs"
+                        value={editAggName} onChange={e => setEditAggName(e.target.value)} placeholder="名称" />
+                    ) : (
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-xs truncate">{cfg.name}</span>
+                          {cfg.active && <span className="text-[8px] text-primary font-semibold px-1.5 py-0.5 rounded-full bg-primary/10">当前</span>}
+                        </div>
                       </div>
                     )}
+                    {!isEditing && (
+                      <button onClick={() => {
+                        setEditingAggId(cfg.id)
+                        setEditAggName(cfg.name || '')
+                        setEditAggUrl(cfg.base_url || '')
+                        setEditAggKey(cfg.api_key || '')
+                      }} className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                        <Settings className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
+
+                  {/* URL and key row */}
+                  {isEditing ? (
+                    <div className="space-y-1.5 mb-2">
+                      <input className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[10px] font-mono"
+                        value={editAggUrl} onChange={e => setEditAggUrl(e.target.value)} placeholder="API 地址" />
+                      <div className="relative">
+                        <Lock className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                        <input type={visibleAggKey === cfg.id ? 'text' : 'password'} className="w-full bg-background border border-border rounded-lg pl-7 pr-7 py-1.5 text-[10px] font-mono"
+                          value={editAggKey} onChange={e => setEditAggKey(e.target.value)} placeholder="API Key" />
+                        <button type="button" onClick={() => setVisibleAggKey(visibleAggKey === cfg.id ? null : cfg.id)}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
+                          {visibleAggKey === cfg.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[9px] text-muted-foreground font-mono truncate flex-1">{cfg.base_url}</span>
+                      <button onClick={() => setVisibleAggKey(visibleAggKey === cfg.id ? null : cfg.id)}
+                        className="text-[9px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded flex items-center gap-1 hover:text-foreground transition-colors flex-shrink-0">
+                        <Lock className="w-2.5 h-2.5" />
+                        {visibleAggKey === cfg.id ? cfg.api_key : keyHint}
+                        {visibleAggKey === cfg.id ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Model selector */}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <select value={aggSelectedFamily[cfg.id] || ''} onChange={e => setAggSelectedFamily(p => ({ ...p, [cfg.id]: e.target.value }))}
+                      className="flex-1 bg-muted border border-border rounded-lg px-1.5 py-1 text-[9px] appearance-none min-w-0">
+                      {(aggFamilies[cfg.id] || []).length === 0 && <option>加载中...</option>}
+                      {(aggFamilies[cfg.id] || []).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                    <select value={cfg.model || ''} onChange={async e => {
+                      await updateAggConfig(cfg.id, { model: e.target.value })
+                      fetchAggConfigsAndModels()
+                    }}
+                      className="flex-1 bg-muted border border-border rounded-lg px-1.5 py-1 text-[9px] appearance-none min-w-0">
+                      {!cfg.model && <option value="">版本</option>}
+                      {(() => {
+                        const family = (aggFamilies[cfg.id] || []).find(f => f.id === aggSelectedFamily[cfg.id])
+                        return (family?.versions || []).map(v => <option key={v.value} value={v.value}>{v.label}</option>)
+                      })()}
+                    </select>
+                    {aggLoadingModels[cfg.id] && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground flex-shrink-0" />}
+                    <button onClick={() => loadAggModels([cfg])} disabled={aggLoadingModels[cfg.id]}
+                      className="p-1 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
+                      <RefreshCw className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+
+                  {/* Actions */}
+                  {isEditing ? (
+                    <div className="flex items-center gap-1.5 pt-1 border-t border-border/40">
+                      <button onClick={async () => {
+                        await updateAggConfig(cfg.id, { name: editAggName, base_url: editAggUrl, api_key: editAggKey })
+                        setEditingAggId(null)
+                        fetchAggConfigsAndModels()
+                      }} disabled={!editAggName || !editAggUrl || !editAggKey}
+                        className="btn-gradient flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-medium">
+                        <Save className="w-2.5 h-2.5" /> 保存
+                      </button>
+                      <button onClick={() => setEditingAggId(null)}
+                        className="px-2.5 py-1 rounded-lg border border-border text-[9px] hover:bg-muted transition-colors">
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 pt-1 border-t border-border/40">
+                      <button onClick={async () => {
+                        setAggTestingSet(p => ({ ...p, [cfg.id]: true }))
+                        const r = await testAggConfig({ base_url: cfg.base_url, api_key: cfg.api_key })
+                        setAggTestResultSet(p => ({ ...p, [cfg.id]: r }))
+                        setAggTestingSet(p => ({ ...p, [cfg.id]: false }))
+                      }} disabled={aggTestingSet[cfg.id]}
+                        className="flex items-center gap-0.5 px-2 py-1 rounded-lg border border-border text-[9px] hover:bg-muted disabled:opacity-40 transition-colors">
+                        {aggTestingSet[cfg.id] ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
+                        测试
+                      </button>
+                      {cfg.active ? (
+                        <span className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[9px] font-medium text-primary border border-primary/30 bg-primary/10">
+                          <Check className="w-2.5 h-2.5" /> 使用中
+                        </span>
+                      ) : (
+                        <button onClick={() => { activateAggConfig(cfg.id).then(() => fetchAggConfigsAndModels()) }}
+                          className="flex items-center gap-0.5 px-2 py-1 rounded-lg border border-accent/30 text-[9px] text-accent hover:bg-accent/10 transition-colors">
+                          <Check className="w-2.5 h-2.5" /> 使用
+                        </button>
+                      )}
+                      <button onClick={() => { if (!confirm('确定删除？')) return; deleteAggConfig(cfg.id).then(() => fetchAggConfigsAndModels()) }}
+                        className="flex items-center gap-0.5 px-2 py-1 rounded-lg border border-red-400/30 text-[9px] text-red-400 hover:bg-red-400/10 transition-colors ml-auto">
+                        <Trash2 className="w-2.5 h-2.5" /> 删除
+                      </button>
+                    </div>
+                  )}
+
+                  {aggTestResultSet[cfg.id] && (
+                    <div className={`flex items-center gap-1 p-1.5 mt-1.5 rounded-lg text-[9px] ${aggTestResultSet[cfg.id].success ? 'bg-green-400/5 border border-green-400/20' : 'bg-red-400/5 border border-red-400/20'}`}>
+                      <span>{aggTestResultSet[cfg.id].success ? '✅' : '❌'}</span>
+                      <span className={aggTestResultSet[cfg.id].success ? 'text-green-400' : 'text-red-400'}>{aggTestResultSet[cfg.id].message || aggTestResultSet[cfg.id].error}</span>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+            )
+            })}
 
             {/* 添加聚合平台卡片 — 独立的虚线卡片 */}
             {!newAggExpanded ? (
@@ -549,7 +609,7 @@ export default function SettingsPage() {
                         })
                         setNewAggExpanded(false)
                         setNewAggName(''); setNewAggUrl(''); setNewAggKey(''); setNewAggModel('')
-                        fetchAggConfigs(typeKey).then(d => setAggConfigs(d.configs || []))
+                        fetchAggConfigsAndModels()
                         toast('已添加', 'success')
                       }} disabled={!newAggName || !newAggUrl || !newAggKey}
                         className="btn-gradient flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-medium">

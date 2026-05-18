@@ -4,8 +4,12 @@ from typing import Optional
 
 class VideoBackend(ABC):
     @abstractmethod
-    def image_to_video(self, image_path: str, prompt: str) -> str:
+    def image_to_video(self, image_path: str, prompt: str, resolution: str = "1280x720", duration: int = 5, generate_audio: bool = False) -> str:
         """Submit image-to-video task, return task_id"""
+
+    @abstractmethod
+    def text_to_video(self, prompt: str, resolution: str = "1280x720", duration: int = 5, generate_audio: bool = False) -> str:
+        """Submit text-to-video task, return task_id"""
 
     @abstractmethod
     def check_status(self, task_id: str) -> dict:

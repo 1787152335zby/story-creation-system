@@ -24,7 +24,6 @@ _IMAGE_BACKEND_REGISTRY: dict[str, str] = {
     "custom": "CustomImageBackend",
 }
 
-# Aliases: the module file for all these is image_api_openai_compat
 _IMAGE_BACKEND_MODULE = {
     "gpt-image-1": "tools.image_api_openai_compat",
     "gpt_image": "tools.image_api_openai_compat",
@@ -34,7 +33,13 @@ _IMAGE_BACKEND_MODULE = {
 }
 
 
-def create_image_backend(backend_name: str = "seedream") -> ImageBackend:
+def create_image_backend(backend_name: str = "seedream", api_key: str = "", base_url: str = "") -> ImageBackend:
+    """Create an image backend. If api_key/base_url provided, pass to the backend."""
+    # For seedream, always go direct to avoid circular import
+    if backend_name == "seedream":
+        from tools.image_api_seedream import SeedreamBackend
+        return SeedreamBackend(api_key=api_key, base_url=base_url)
+
     # Try legacy naming convention first (tools/image_api_{name}.py)
     try:
         import importlib
@@ -50,6 +55,10 @@ def create_image_backend(backend_name: str = "seedream") -> ImageBackend:
     if mod_path:
         import importlib
         module = importlib.import_module(mod_path)
+        if backend_name == "custom" and (api_key or base_url):
+            cls_name = _IMAGE_BACKEND_REGISTRY.get(backend_name, "")
+            if cls_name and hasattr(module, cls_name):
+                return getattr(module, cls_name)(api_key=api_key, base_url=base_url)
         cls_name = _IMAGE_BACKEND_REGISTRY.get(backend_name, "")
         if cls_name and hasattr(module, cls_name):
             return getattr(module, cls_name)()

@@ -6,6 +6,8 @@ __pycache__/
 .python-version
 .projects/
 projects/
+templates/
+generated/
 *.egg-info/
 .idea/
 .vscode/

@@ -2,6 +2,8 @@ from core.agent_base import AgentBase
 from core.project_manager import ProjectManager
 from core.style_config import StyleConfig
 from core.visual_bible import VisualBibleExtractor
+from tools.content_splitter import split_by_headings, make_split_filename
+import re
 
 
 class PromptBuilder:
@@ -51,8 +53,8 @@ class PromptBuilder:
         return " ".join(parts)
 
     @staticmethod
-    def generate_storyboard_prompt(
-        storyboard_text: str,
+    def generate_storyboard_shot_prompt(
+        shot_text: str,
         characters: list[dict],
         scenes: list[dict],
         style_context: str = ""
@@ -69,7 +71,7 @@ class PromptBuilder:
             for s in scenes
         )
 
-        prompt = f"""你是一位专业的 AI 视频提示词工程师。请根据下列信息生成高质量的视频生成提示词。
+        prompt = f"""你是一位专业的 AI 视频提示词工程师。请根据下列信息生成一个镜头的高质量视频生成提示词。
 
 ## 角色参考
 {char_refs or '无'}
@@ -77,13 +79,13 @@ class PromptBuilder:
 ## 场景参考
 {scene_refs or '无'}
 
-## 分镜内容
-{storyboard_text}
+## 镜头内容
+{shot_text}
 
 ## 要求
-- 每个镜头写一个提示词，包含：镜头运动、人物动作、表情、环境氛围
+- 生成一个完整的提示词，包含：镜头运动、人物动作、表情、环境氛围
 - 引用角色外貌时保持一致性
-- 输出格式：每个镜头用 --- 分隔
+- 直接输出提示词内容，不要额外说明
 
 {style_context}
 """
@@ -154,19 +156,76 @@ class PromptFactory(AgentBase):
         )
         yield "✅ 场景提示词已保存\n\n"
 
-        # === 分镜提示词 ===
+        # === 分镜提示词（按幕/集分组，每个镜头一条） ===
         if storyboard.strip():
             yield "## 分镜提示词\n\n"
             style_ctx = self.get_style_context(style)
-            prompt = PromptBuilder.generate_storyboard_prompt(storyboard, chars, scenes, style_ctx)
-            sb_lines = []
-            for token in self.call_llm_stream(prompt, "", temperature=0.7):
-                sb_lines.append(token)
-                yield token
-            sb_text = "".join(sb_lines)
-            output_dir.joinpath("分镜提示词.md").write_text(
-                "# 分镜提示词\n\n" + sb_text, encoding="utf-8"
-            )
-            yield "\n\n✅ 分镜提示词已保存\n"
+
+            # Split storyboard by act/episode headers
+            groups = split_by_headings(storyboard)
+            all_shot_prompts = []
+
+            for heading, group_content in groups:
+                group_label = heading.strip().lstrip("#").strip() if heading else "全部"
+                shot_prompts = []
+
+                # Extract individual shots (镜头001 ... ---)
+                shot_pattern = re.compile(
+                    r'(镜头\d+\s*\|[^➜]*?(?:➜\s*(?:镜头\d+|下个镜头))?(?:\n---)?)',
+                    re.MULTILINE
+                )
+                # Fallback: split by --- or 镜头 marker
+                shots = []
+                raw_shots = re.split(r'\n---\n', group_content)
+                for rs in raw_shots:
+                    rs = rs.strip()
+                    if not rs:
+                        continue
+                    if re.match(r'镜头\d+', rs):
+                        shots.append(rs)
+                    else:
+                        # Try to find shot markers within the block
+                        inner_shots = re.findall(r'(镜头\d+\s*\|.*?)(?=\n镜头\d+|\Z)', rs, re.DOTALL)
+                        if inner_shots:
+                            shots.extend(inner_shots)
+                        else:
+                            shots.append(rs)
+
+                for i, shot in enumerate(shots):
+                    shot = shot.strip()
+                    if not shot:
+                        continue
+                    shot_label = f"{group_label} 镜头{i+1}"
+                    yield f"### {shot_label}\n\n"
+
+                    prompt = PromptBuilder.generate_storyboard_shot_prompt(shot, chars, scenes, style_ctx)
+                    shot_result = ""
+                    for token in self.call_llm_stream(prompt, "", temperature=0.7):
+                        shot_result += token
+                        yield token
+
+                    shot_prompts.append(f"### 镜头{i+1}\n\n{shot_result.strip()}")
+                    yield "\n\n---\n\n"
+
+                if shot_prompts:
+                    all_shot_prompts.append((group_label, shot_prompts))
+                    # Save per-group file
+                    group_file = f"分镜提示词_{heading}.md" if heading else "分镜提示词.md"
+                    safe_name = re.sub(r'[\\/*?:"<>|#\s]', "", group_label)
+                    filename = f"分镜提示词_{safe_name}.md"
+                    output_dir.joinpath(filename).write_text(
+                        f"# {group_label} 分镜提示词\n\n" + "\n\n".join(shot_prompts),
+                        encoding="utf-8"
+                    )
+                    yield f"✅ {group_label} 分镜提示词已保存\n\n"
+
+            # Save combined file
+            if all_shot_prompts:
+                combined = []
+                for label, prompts in all_shot_prompts:
+                    combined.append(f"# {label} 分镜提示词\n\n" + "\n\n".join(prompts))
+                output_dir.joinpath("分镜提示词.md").write_text(
+                    "\n\n".join(combined), encoding="utf-8"
+                )
         else:
             yield "⏭️ 暂无分镜内容，跳过分镜提示词\n"

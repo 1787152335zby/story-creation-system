@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Sparkles, Loader2, RefreshCw, Upload, Download, X, Video } from 'lucide-react'
-import { fetchProjects, fetchVideoClips, getMediaUrl, freeVideoGen, fetchVideoResolutions, fetchActiveConfig, fetchGenerationHistory, fetchProjectImages } from '../lib/api'
+import { fetchProjects, fetchVideoClips, getMediaUrl, freeVideoGen, fetchVideoResolutions, fetchActiveConfig, fetchGenerationHistory, fetchProjectImages, fetchConfirmedImages, fetchProjectVisualAssets } from '../lib/api'
 import ModelSelector from '../components/ModelSelector'
+import VideoProjectPanel from '../components/VideoProjectPanel'
 import ImagePreview from '../components/ImagePreview'
 
 import { useToast } from '../components/Toast'
@@ -21,11 +22,16 @@ export default function VideoGenPage() {
   const [resolutions, setResolutions] = useState<string[]>([])
   const [ratioGroups, setRatioGroups] = useState<Record<string, string[]>>({})
   const [selectedRatio, setSelectedRatio] = useState('')
-  const [freeResolution, setFreeResolution] = useState('1024x1024')
+  const [freeResolution, setFreeResolution] = useState('')
   const [videoModel, setVideoModel] = useState('')
   const [freeElapsed, setFreeElapsed] = useState(0)
+  const [generateAudio, setGenerateAudio] = useState(false)
+  const [refProjects, setRefProjects] = useState<any[]>([])
+  const [selectedRefProject, setSelectedRefProject] = useState('')
+  const [refProjectImages, setRefProjectImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
   const [historyVideos, setHistoryVideos] = useState<{ name: string; url: string }[]>([])
   const [projectImages, setProjectImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
+  const [confirmedImages, setConfirmedImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
   // Project mode
@@ -38,15 +44,19 @@ export default function VideoGenPage() {
 
   useEffect(() => {
     fetchProjects().then(setProjects)
-    fetchVideoResolutions().then(r => {
-      setResolutions(r.resolutions)
-      setRatioGroups(r.groups)
-      const ratios = Object.keys(r.groups)
-      if (ratios.length > 0) setSelectedRatio(ratios[0])
-    })
+    fetchProjects().then(setRefProjects)
     fetchGenerationHistory().then(h => setHistoryVideos(h.videos))
     fetchActiveConfig('video').then(cfg => {
-      if (cfg?.model) setVideoModel(cfg.model)
+      const model = cfg?.model || ''
+      setVideoModel(model)
+      fetchVideoResolutions(model || undefined).then(r => {
+        setResolutions(r.resolutions)
+        setRatioGroups(r.groups)
+        const ratios = Object.keys(r.groups)
+        const defaultRatio = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
+        setSelectedRatio(defaultRatio)
+        setFreeResolution(r.resolutions[0] || '1024x1024')
+      })
     })
   }, [])
 
@@ -55,9 +65,9 @@ export default function VideoGenPage() {
       setResolutions(r.resolutions)
       setRatioGroups(r.groups)
       const ratios = Object.keys(r.groups)
-      const first = ratios[0] || ''
+      const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
       setSelectedRatio(first)
-      if (freeResolution && !r.resolutions.includes(freeResolution)) setFreeResolution(r.resolutions[0] || '1024x1024')
+      setFreeResolution(r.resolutions[0] || '1024x1024')
     })
   }, [videoModel])
 
@@ -65,7 +75,13 @@ export default function VideoGenPage() {
     if (!selectedProject) return
     refreshClips()
     fetchProjectImages(selectedProject).then(setProjectImages)
+    fetchConfirmedImages(selectedProject).then(setConfirmedImages)
   }, [selectedProject])
+
+  useEffect(() => {
+    if (!selectedRefProject) return
+    fetchProjectVisualAssets(selectedRefProject).then(setRefProjectImages)
+  }, [selectedRefProject])
 
   const refreshClips = () => {
     if (!selectedProject) return
@@ -94,14 +110,15 @@ export default function VideoGenPage() {
   }
 
   const handleFreeGen = async () => {
-    if (!freePrompt.trim() || freeFiles.length === 0) return
+    if (!freePrompt.trim()) return
     setFreeGenerating(true)
     setFreeResult(null)
     setFreeElapsed(0)
     const startTime = Date.now()
     const timer = setInterval(() => setFreeElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
     try {
-      const result = await freeVideoGen(freePrompt, freeFiles.map(f => f.file))
+      const files = freeFiles.length > 0 ? freeFiles.map(f => f.file) : undefined
+      const result = await freeVideoGen(freePrompt, files, videoModel, freeResolution || undefined, undefined, generateAudio)
       setFreeResult(result)
     } catch (e: any) {
       setFreeResult({ error: e.message })
@@ -180,13 +197,114 @@ export default function VideoGenPage() {
                 </div>
               )}
 
+              {/* Project reference gallery */}
+              <div className="glass-card rounded-xl p-4 mb-4">
+                <label className="text-xs font-medium text-muted-foreground mb-2 block">📂 引用项目素材（点击图片添加到参考）</label>
+                <select value={selectedRefProject} onChange={e => setSelectedRefProject(e.target.value)} 
+                  className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-xs mb-3">
+                  <option value="">-- 不引用 --</option>
+                  {refProjects.map((p: any) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+                {Object.keys(refProjectImages.characters).length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-[10px] text-muted-foreground mb-1">👤 角色</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(refProjectImages.characters).map(([name, imgs]) =>
+                        (imgs as any[]).map((img, i) => (
+                          <img key={`${name}-${i}`} src={img.url} alt={name}
+                            className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
+                            onClick={() => { 
+                              fetch(img.url).then(r => r.blob()).then(blob => {
+                                const file = new File([blob], `${name}.png`, { type: 'image/png' })
+                                const reader = new FileReader()
+                                reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+                                reader.readAsDataURL(blob)
+                              })
+                            }} title={name} />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+                {Object.keys(refProjectImages.scenes).length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1">🌆 场景</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(refProjectImages.scenes).map(([name, imgs]) =>
+                        (imgs as any[]).map((img, i) => (
+                          <img key={`${name}-${i}`} src={img.url} alt={name}
+                            className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
+                            onClick={() => {
+                              fetch(img.url).then(r => r.blob()).then(blob => {
+                                const file = new File([blob], `${name}.png`, { type: 'image/png' })
+                                const reader = new FileReader()
+                                reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+                                reader.readAsDataURL(blob)
+                              })
+                            }} title={name} />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Confirmed images from current project */}
+              {(Object.keys(confirmedImages.characters).length > 0 || Object.keys(confirmedImages.scenes).length > 0) && (
+                <div className="glass-card rounded-xl p-4 mb-4">
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">✅ 已确认素材（点击添加到参考）</label>
+                  {Object.keys(confirmedImages.characters).length > 0 && (
+                    <div className="mb-2">
+                      <p className="text-[10px] text-muted-foreground mb-1">👤 角色</p>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(confirmedImages.characters).map(([name, imgs]) =>
+                          (imgs as any[]).map((img, i) => (
+                            <img key={`${name}-${i}`} src={img.url} alt={name}
+                              className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-green-400/50 transition-all"
+                              onClick={() => { 
+                                fetch(img.url).then(r => r.blob()).then(blob => {
+                                  const file = new File([blob], `${name}.png`, { type: 'image/png' })
+                                  const reader = new FileReader()
+                                  reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+                                  reader.readAsDataURL(blob)
+                                })
+                              }} title={name} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {Object.keys(confirmedImages.scenes).length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">🌆 场景</p>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(confirmedImages.scenes).map(([name, imgs]) =>
+                          (imgs as any[]).map((img, i) => (
+                            <img key={`${name}-${i}`} src={img.url} alt={name}
+                              className="w-12 h-12 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-green-400/50 transition-all"
+                              onClick={() => {
+                                fetch(img.url).then(r => r.blob()).then(blob => {
+                                  const file = new File([blob], `${name}.png`, { type: 'image/png' })
+                                  const reader = new FileReader()
+                                  reader.onload = (ev) => setFreeFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+                                  reader.readAsDataURL(blob)
+                                })
+                              }} title={name} />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Prompt */}
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">动作描述</label>
               <textarea value={freePrompt} onChange={e => setFreePrompt(e.target.value)}
                 placeholder="例如：角色缓缓转身，风吹动衣角，背景的云层在流动..." className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-24 resize-none text-sm mb-4" />
 
               {/* Resolution + Model + Duration */}
-              <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-4 gap-4 mb-4">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">模型</label>
                   <ModelSelector type="video" value={videoModel} onChange={setVideoModel} />
@@ -216,7 +334,16 @@ export default function VideoGenPage() {
                 </div>
               </div>
 
-              <button onClick={handleFreeGen} disabled={freeGenerating || !freePrompt.trim() || freeFiles.length === 0}
+              {/* Audio toggle */}
+              <div className="flex items-center gap-3 mb-4">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" className="sr-only peer" checked={generateAudio} onChange={e => setGenerateAudio(e.target.checked)} />
+                  <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+                <span className="text-xs text-muted-foreground">生成音频（对白+音效）</span>
+              </div>
+
+              <button onClick={handleFreeGen} disabled={freeGenerating || !freePrompt.trim()}
                 className="btn-gradient flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg, hsl(350, 80%, 60%), hsl(330, 80%, 50%))' }}>
                 {freeGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -269,86 +396,7 @@ export default function VideoGenPage() {
               </select>
             </div>
 
-            {selectedProject && (
-              <>
-                {/* Project generated images */}
-                {(Object.keys(projectImages.characters).length > 0 || Object.keys(projectImages.scenes).length > 0) && (
-                  <div className="glass-card rounded-2xl p-5 mb-6">
-                    <h3 className="font-semibold text-sm mb-4">🖼️ 项目图片</h3>
-                    {Object.keys(projectImages.characters).length > 0 && (
-                      <div className="mb-4">
-                        <p className="text-[10px] text-muted-foreground mb-2 font-medium">👤 角色</p>
-                        <div className="flex flex-wrap gap-3">
-                          {Object.entries(projectImages.characters).map(([charName, images]) => (
-                            images.map((img, i) => (
-                              <img key={`${charName}-${i}`} src={img.url} alt={charName}
-                                className="w-16 h-16 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                                onClick={() => setPreviewSrc(img.url)} title={charName} />
-                            ))
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {Object.keys(projectImages.scenes).length > 0 && (
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-2 font-medium">🌆 场景</p>
-                        <div className="flex flex-wrap gap-3">
-                          {Object.entries(projectImages.scenes).map(([sceneName, images]) => (
-                            images.map((img, i) => (
-                              <img key={`${sceneName}-${i}`} src={img.url} alt={sceneName}
-                                className="w-16 h-16 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                                onClick={() => setPreviewSrc(img.url)} title={sceneName} />
-                            ))
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {finalClip && (
-                  <div className="glass-card rounded-2xl p-5 mb-6">
-                    <h3 className="font-semibold text-sm mb-3">▶️ 成片</h3>
-                    <video src={getMediaUrl(selectedProject, finalClip.file)} controls className="w-full max-w-2xl rounded-xl" style={{ maxHeight: '450px' }} />
-                  </div>
-                )}
-
-                <div className="glass-card rounded-2xl p-5 mb-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-sm">🎬 视频片段 ({clips.length})</h3>
-                    <button onClick={refreshClips} className="p-1.5 rounded-lg hover:bg-muted" title="刷新"><RefreshCw className="w-3.5 h-3.5" /></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {clips.map((clip) => (
-                      <div key={clip.file} className="bg-muted rounded-xl overflow-hidden">
-                        <video src={getMediaUrl(selectedProject, clip.file)} controls className="w-full" style={{ maxHeight: '240px' }} preload="metadata" />
-                        <p className="text-[10px] text-center py-1.5 text-muted-foreground">{clip.name}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {clips.length === 0 && !finalClip && (
-                    <div className="text-center py-10">
-                      <div className="empty-icon"><Video className="w-5 h-5 text-muted-foreground" /></div>
-                      <p className="font-medium text-sm mb-1">暂无视频</p>
-                      <p className="text-muted-foreground text-xs">完成视频生成后，结果会显示在这里</p>
-                    </div>
-                  )}
-                </div>
-
-                <button onClick={handleProjectGen} disabled={generating !== null}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl font-medium disabled:opacity-50"
-                  style={{ background: 'linear-gradient(135deg, hsl(350, 80%, 60%), hsl(330, 80%, 50%))' }}>
-                  {generating === 'all' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                  {generating === 'all' ? '生成中...' : '生成全片视频'}
-                </button>
-
-                {log.length > 0 && (
-                  <div className="mt-4 glass-card rounded-2xl p-4 max-h-48 overflow-y-auto">
-                    {log.map((l, i) => <p key={i} className="text-xs font-mono leading-relaxed">{l}</p>)}
-                  </div>
-                )}
-              </>
-            )}
+            {selectedProject && <VideoProjectPanel projectName={selectedProject} />}
           </>
         )}
 

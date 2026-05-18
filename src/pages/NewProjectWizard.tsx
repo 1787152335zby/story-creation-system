@@ -40,8 +40,15 @@ export default function NewProjectWizard() {
 
   useEffect(() => {
     fetchAvailableModels().then(data => {
-      setLlmModels(data.llm)
-      if (data.llm.length > 0) setSelectedModel(data.llm[0].value)
+      const groups = data.llm_groups || []
+      const all: { value: string; label: string }[] = []
+      for (const g of groups) {
+        for (const m of (g.models || [])) {
+          all.push({ value: m.value, label: `[${g.name}] ${m.label}` })
+        }
+      }
+      setLlmModels(all)
+      if (all.length > 0) setSelectedModel(all[0].value)
     })
     fetchTemplates().then(setTemplates)
   }, [])

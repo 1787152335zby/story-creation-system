@@ -10,12 +10,18 @@ class SeedanceBackend(VideoBackend):
         self.api_key = os.getenv("SEEDANCE_API_KEY", "")
         self.submit_url = "https://api.volcengine.com/ark/v1/video/generate"
         self.query_url = "https://api.volcengine.com/ark/v1/video/status"
+        self.text_submit_url = "https://api.volcengine.com/ark/v1/video/generate"
 
-    def image_to_video(self, image_path: str, prompt: str) -> str:
+    def image_to_video(self, image_path: str, prompt: str, resolution: str = "1280x720", duration: int = 5, generate_audio: bool = False) -> str:
         file_name = os.path.basename(image_path)
         with open(image_path, "rb") as f:
             files = {"image": (file_name, f, "image/png")}
-            data = {"prompt": prompt}
+            data = {
+                "prompt": prompt,
+                "resolution": resolution,
+                "duration": str(duration),
+                "generate_audio": str(generate_audio).lower(),
+            }
             headers = {"Authorization": f"Bearer {self.api_key}"}
             resp = requests.post(
                 self.submit_url,
@@ -24,6 +30,24 @@ class SeedanceBackend(VideoBackend):
                 files=files,
                 timeout=60,
             )
+        resp.raise_for_status()
+        result = resp.json()
+        return result.get("id", "")
+
+    def text_to_video(self, prompt: str, resolution: str = "1280x720", duration: int = 5, generate_audio: bool = False) -> str:
+        import json
+        payload = {
+            "model": "doubao-seedance-2-0-260128",
+            "prompt": prompt,
+            "resolution": resolution,
+            "duration": duration,
+            "generate_audio": generate_audio,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.post(self.text_submit_url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         result = resp.json()
         return result.get("id", "")

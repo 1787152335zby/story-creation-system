@@ -182,7 +182,8 @@ def categorize_model(model_id: str) -> str:
     """按模型名称关键词判断类型: llm / image / video。"""
     ml = model_id.lower()
     if any(x in ml for x in ["image", "mj_", "flux", "dall-e", "seedream", "kling-image",
-                              "wan2.7-image", "midjourney", "mj_imagine", "mj_upscale"]):
+                              "wan2.7-image", "midjourney", "mj_imagine", "mj_upscale",
+                              "gemini"]) and "video" not in ml:
         return "image"
     if any(x in ml for x in ["video", "viduq", "veo", "kling-video", "sora", "seedance",
                               "i2v", "t2v", "happyhorse"]):
@@ -680,7 +681,17 @@ def test_aggregated(req: TestAggRequest):
         models_url += "/models" if "/v1" in models_url else "/v1/models"
         resp = requests.get(models_url, headers={"Authorization": f"Bearer {key}"}, timeout=15)
         if resp.status_code == 200:
-            data = resp.json()
+            body = resp.text.strip()
+            if not body:
+                # 200 但响应体为空，用客户端 chat API 做二次验证
+                chat_url = base.rstrip("/") + "/chat/completions"
+                chat_resp = requests.post(chat_url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}, timeout=15)
+                if chat_resp.status_code == 200:
+                    return {"success": True, "message": "连接成功（模型列表不可用，Chat API 正常）"}
+                error_detail = chat_resp.text[:200]
+                return {"success": False, "error": f"模型列表接口返回空，Chat API 状态码 {chat_resp.status_code}: {error_detail}"}
+            data = json.loads(body)
             items = data.get("data", data) if isinstance(data, dict) else data
             count = len(items) if isinstance(items, list) else 0
             return {"success": True, "message": f"连接成功，可用模型 {count} 个"}

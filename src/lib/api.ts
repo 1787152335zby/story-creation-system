@@ -200,14 +200,24 @@ export async function freeImageGen(prompt: string, negativePrompt: string = '', 
   return res.json()
 }
 
-export async function freeVideoGen(prompt: string, files: File[]): Promise<{ video_url?: string; local?: string; error?: string; task_id?: string }> {
+export async function freeVideoGen(prompt: string, files?: File[], model?: string, resolution?: string, duration?: number, generate_audio?: boolean): Promise<{ video_url?: string; local?: string; error?: string; task_id?: string }> {
   const form = new FormData()
   form.append('prompt', prompt)
-  files.forEach(f => form.append('files', f))
+  if (files && files.length > 0) files.forEach(f => form.append('files', f))
+  if (model) form.append('model', model)
+  if (resolution) form.append('resolution', resolution)
+  if (duration) form.append('duration', String(duration))
+  if (generate_audio) form.append('generate_audio', 'true')
   const res = await fetch(`${BASE}/video-gen/free`, {
     method: 'POST',
     body: form,
   })
+  return res.json()
+}
+
+export async function fetchProjectVisualAssets(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/visual-assets`)
+  if (!res.ok) return { characters: {}, scenes: {} }
   return res.json()
 }
 
@@ -338,7 +348,10 @@ export async function projectImageGen(params: {
   model?: string
   character_names?: string[]
   scene_names?: string[]
-}): Promise<{ images: { url: string; local: string }[]; project_images: { folder: string; images: { url: string; local: string }[] }[] }> {
+  reference_url?: string
+  reference_urls?: string[]
+  version?: string
+}): Promise<{ images: { url: string; local: string }[]; project_images: { folder: string; images: { url: string; local: string }[] }[]; versions?: Record<string, number> }> {
   const res = await fetch(`${BASE}/image-gen/project`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -348,9 +361,48 @@ export async function projectImageGen(params: {
   return res.json()
 }
 
+export async function stitchImages(imagePaths: string[], saveTo: string = ''): Promise<{ url: string; local: string; name: string; saved_to?: string }> {
+  const res = await fetch(`${BASE}/image-gen/stitch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_paths: imagePaths, save_to: saveTo }),
+  })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '拼图失败') }
+  return res.json()
+}
+
 export async function fetchProjectImages(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
   const res = await fetch(`${BASE}/image-gen/project-images/${encodeURIComponent(projectName)}`)
   if (!res.ok) return { characters: {}, scenes: {} }
+  return res.json()
+}
+
+export async function fetchConfirmedImages(projectName: string): Promise<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }> {
+  const res = await fetch(`${BASE}/image-gen/confirmed-images/${encodeURIComponent(projectName)}`)
+  if (!res.ok) return { characters: {}, scenes: {} }
+  return res.json()
+}
+
+export async function deleteGeneratedFile(filePath: string): Promise<void> {
+  const res = await fetch(`${BASE}/image-gen/delete?file_path=${encodeURIComponent(filePath)}`, { method: 'DELETE' })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '删除失败') }
+}
+
+export async function clearProjectFolder(projectName: string, subfolder: string): Promise<{ deleted: number }> {
+  const res = await fetch(`${BASE}/image-gen/clear-folder?project_name=${encodeURIComponent(projectName)}&subfolder=${encodeURIComponent(subfolder)}`, { method: 'POST' })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '清空失败') }
+  return res.json()
+}
+
+export async function confirmVersion(projectName: string, entityType: string, entityName: string, version: string): Promise<{ confirmed: boolean; version: string }> {
+  const res = await fetch(`${BASE}/image-gen/confirm-version?project_name=${encodeURIComponent(projectName)}&entity_type=${encodeURIComponent(entityType)}&entity_name=${encodeURIComponent(entityName)}&version=${encodeURIComponent(version)}`, { method: 'POST' })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '确认失败') }
+  return res.json()
+}
+
+export async function deleteVersion(projectName: string, entityType: string, entityName: string, version: string): Promise<{ deleted: boolean; version: string }> {
+  const res = await fetch(`${BASE}/image-gen/delete-version?project_name=${encodeURIComponent(projectName)}&entity_type=${encodeURIComponent(entityType)}&entity_name=${encodeURIComponent(entityName)}&version=${encodeURIComponent(version)}`, { method: 'POST' })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '删除版本失败') }
   return res.json()
 }
 

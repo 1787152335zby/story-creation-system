@@ -6,9 +6,15 @@ from .image_api import ImageBackend
 
 
 class SeedreamBackend(ImageBackend):
-    def __init__(self):
-        self.api_key = os.getenv("SEEDANCE_API_KEY", "")
-        self.base_url = "https://api.volcengine.com/ark/v1/images/generations"
+    def __init__(self, api_key: str = "", base_url: str = ""):
+        self.api_key = api_key or os.getenv("SEEDANCE_API_KEY", "")
+        url = (base_url or "https://api.volcengine.com/ark/v1").rstrip("/")
+        if "/images/" not in url:
+            if "/v1/" in url or "/v1" in url:
+                url = url.rstrip("/") + "/images/generations"
+            else:
+                url = url.rstrip("/") + "/v1/images/generations"
+        self.base_url = url
 
     def text_to_image(self, prompt: str, negative_prompt: str = "", size: str = "1024x1024", n: int = 1, model: str = "") -> list[str]:
         if not self.api_key or self.api_key == "your-seedance-key-here":

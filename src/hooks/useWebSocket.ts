@@ -24,6 +24,8 @@ export function useWebSocket() {
   const [progress, setProgress] = useState({ current: 0, total: 5 })
   const [awaitingApproval, setAwaitingApproval] = useState(false)
   const [awaitingVersion, setAwaitingVersion] = useState(false)
+  const [awaitingProceed, setAwaitingProceed] = useState(false)
+  const [contentWarnings, setContentWarnings] = useState<{ phase_index: number; warnings: string[]; stats: Record<string, number> }[]>([])
   const [isComplete, setIsComplete] = useState(false)
   const [streamDone, setStreamDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +55,8 @@ export function useWebSocket() {
     setIsComplete(false)
     setAwaitingApproval(false)
     setAwaitingVersion(false)
+    setAwaitingProceed(false)
+    setContentWarnings([])
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
@@ -105,6 +109,12 @@ export function useWebSocket() {
           break
         case 'awaiting_version':
           setAwaitingVersion(true)
+          break
+        case 'waiting_for_proceed':
+          setAwaitingProceed(true)
+          break
+        case 'content_warning':
+          setContentWarnings(prev => [...prev, { phase_index: msg.phase_index, warnings: msg.warnings || [], stats: msg.stats || {} }])
           break
         case 'version_applied':
           setAwaitingVersion(false)
@@ -169,6 +179,10 @@ export function useWebSocket() {
     setAwaitingApproval(false)
   }, [send])
 
+  const proceedGeneration = useCallback(() => {
+    send({ action: 'proceed' })
+  }, [send])
+
   const disconnect = useCallback(() => {
     isGeneratingRef.current = false
     cleanup()
@@ -189,8 +203,8 @@ export function useWebSocket() {
   }, [send])
 
   return {
-    connect, send, approve, revise, reject, confirmPhase, selectVersion, disconnect, clearStream,
+    connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream,
     connected, streamContent, currentPhase, phases,
-    progress, awaitingApproval, awaitingVersion, isComplete, streamDone, error,
+    progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error,
   }
 }

@@ -6,6 +6,7 @@ from core.project_manager import ProjectManager
 from core.style_config import StyleConfig, STORY_TYPES
 from core.workflow_loader import WorkflowLoader
 from agents.orchestrator import _split_sort_key
+from core.content_validator import validate_content
 
 from .ws_manager import ConnectionManager
 
@@ -24,6 +25,31 @@ class AsyncOrchestrator:
 
     def __init__(self, ws_manager: ConnectionManager):
         self.ws = ws_manager
+
+    def _validate_and_notify(self, project, project_name: str, phase_index: int, content: str):
+        """Check content volume and warn if exceeds target"""
+        try:
+            config = project.config
+            style_data = config.get("style", {})
+            dm = style_data.get("duration_mode", "1")
+            if dm != "2":
+                return
+            count = int(style_data.get("episode_count", 0)) if style_data.get("episode_count") else 0
+            d = (style_data.get("episode_duration", "") or "").replace("分钟", "").replace("分", "").strip()
+            per = int(d) if d.isdigit() else 0
+            total_minutes = count * per if count > 0 and per > 0 else 0
+            if total_minutes <= 0:
+                return
+            result = validate_content(content, total_minutes)
+            if not result["passed"]:
+                asyncio.ensure_future(self.ws.send_message(project_name, {
+                    "type": "content_warning",
+                    "phase_index": phase_index,
+                    "warnings": result["warnings"],
+                    "stats": result["stats"],
+                }))
+        except Exception:
+            pass
 
     async def run(self, project_name: str, style_data: dict):
         project = ProjectManager(project_name)
@@ -216,7 +242,16 @@ class AsyncOrchestrator:
 
                 if approval.get("approved"):
                     project.mark_phase_done(idx)
+                elif approval.get("confirmed"):
+                    project.mark_phase_done(idx)
+                    await self.ws.wait_for_proceed(project_name)
                 project.clear_pending_approval()
+
+            for pi in range(min(4, len(phases))):
+                p = phases[pi]
+                if p.should_run(style.story_type) and project.config.get("phases", []) and len(project.config["phases"]) > pi:
+                    content = project.read_output(self._get_output_path(p)) or ""
+                    self._validate_and_notify(project, project_name, pi, content)
 
             await self.ws.send_message(project_name, {"type": "all_complete"})
         except asyncio.CancelledError:
@@ -396,6 +431,12 @@ class AsyncOrchestrator:
                 if approval.get("approved"):
                     project.mark_phase_done(idx)
                 project.clear_pending_approval()
+
+            for pi in range(min(4, len(phases))):
+                p = phases[pi]
+                if p.should_run(style.story_type):
+                    content = project.read_output(self._get_output_path(p)) or ""
+                    self._validate_and_notify(project, project_name, pi, content)
 
             await self.ws.send_message(project_name, {"type": "all_complete"})
         except asyncio.CancelledError:

@@ -6,6 +6,18 @@ from core.chunk_strategy import ChunkStrategy, ChunkIter
 from core.summary_extractor import SummaryExtractor
 
 
+def _calc_total_minutes(style: StyleConfig) -> str:
+    if style.duration_mode != "2" or not style.episode_count or not style.episode_duration:
+        return "未设置"
+    try:
+        count = int(style.episode_count)
+        d = style.episode_duration.replace("分钟", "").replace("分", "").strip()
+        per = int(d) if d.isdigit() else 0
+        return str(count * per) if per > 0 else "未设置"
+    except:
+        return "未设置"
+
+
 class ScreenplayWriter(AgentBase):
     def run(self, project: ProjectManager, style: StyleConfig, input_content: str) -> str:
         return "".join(self.run_stream(project, style, input_content))
@@ -43,9 +55,11 @@ class ScreenplayWriter(AgentBase):
             prompt = prompt.replace("{writing_style}", writing_style_name)
             prompt = prompt.replace("{script_style}", script_style_name)
             prompt = prompt.replace("{screen_aspect}", SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "自适应"))
-            prompt = prompt.replace("{duration_mode}", style.duration_mode or "自动")
+            duration_label = "自动（由Agent推荐）" if style.duration_mode == "1" else "自定义"
+            prompt = prompt.replace("{duration_mode}", duration_label)
             prompt = prompt.replace("{episode_count}", style.episode_count or "（由AI根据大纲合理分配）")
             prompt = prompt.replace("{episode_duration}", style.episode_duration or "（由AI根据故事类型推荐）")
+            prompt = prompt.replace("{episode_total_minutes}", _calc_total_minutes(style))
             prompt = prompt.replace("{story_type}", story_type_name)
 
             prev_plot_context = ""
@@ -116,9 +130,11 @@ class ScreenplayWriter(AgentBase):
             prompt = prompt.replace("{writing_style}", writing_style_name)
             prompt = prompt.replace("{script_style}", script_style_name)
             prompt = prompt.replace("{screen_aspect}", SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "自适应"))
-            prompt = prompt.replace("{duration_mode}", style.duration_mode or "自动")
+            duration_label = "自动（由Agent推荐）" if style.duration_mode == "1" else "自定义"
+            prompt = prompt.replace("{duration_mode}", duration_label)
             prompt = prompt.replace("{episode_count}", style.episode_count or str(chunk_count))
             prompt = prompt.replace("{episode_duration}", style.episode_duration or "（由AI根据故事类型推荐）")
+            prompt = prompt.replace("{episode_total_minutes}", _calc_total_minutes(style))
             prompt = prompt.replace("{story_type}", story_type_name)
 
             prev_plot_context = ""

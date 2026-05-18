@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Play, Check, Pencil, X, Loader2, Settings, Sparkles, RefreshCw } from 'lucide-react'
+import { Play, Check, Pencil, X, Loader2, Settings, Sparkles, RefreshCw, ArrowLeft, Zap } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { fetchProject, fetchPhaseContent, openProjectFolder, saveProjectTemplate } from '../lib/api'
 import TemplateModal from '../components/TemplateModal'
@@ -46,9 +46,10 @@ export default function Workspace() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [generating, setGenerating] = useState(false)
   const [confirmedPhases, setConfirmedPhases] = useState<number[]>([])
+  const [confirmedPhaseId, setConfirmedPhaseId] = useState<number | null>(null)
   const streamHadContent = useRef(false)
 
-  const { connect, send, approve, revise, reject, confirmPhase, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, isComplete, streamDone, error } = useWebSocket()
+  const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error } = useWebSocket()
 
 
   useEffect(() => {
@@ -198,7 +199,24 @@ export default function Workspace() {
       }})
   }
   const handleApprove = () => { approve(currentPhase); setSelectedPhase(-1); setViewContent(''); setActFileList([]); setSuppressStream(false) }
-  const handleConfirm = () => { confirmPhase(currentPhase); setConfirmedPhases(prev => [...prev, currentPhase]); setSelectedPhase(-1); setViewContent(''); setActFileList([]); setSuppressStream(false) }
+  const handleConfirm = () => {
+    confirmPhase(currentPhase)
+    setConfirmedPhases(prev => [...prev, currentPhase])
+    setConfirmedPhaseId(currentPhase)
+    if (streamContent && !(selectedPhase >= 0 && viewContent)) {
+      setViewContent(streamContent)
+      setSelectedPhase(currentPhase)
+    }
+    setActFileList([])
+    setSuppressStream(true)
+  }
+  const handleProceed = () => {
+    proceedGeneration()
+    setConfirmedPhaseId(null)
+    setViewContent('')
+    setSelectedPhase(-1)
+    setSuppressStream(false)
+  }
   const handleRevise = () => { if (!feedbackText.trim()) return; revise(currentPhase, feedbackText); setFeedbackText(''); setShowFeedback(false) }
   const handleReject = () => { reject(currentPhase, '不满意') }
   const handleVersionA = () => { selectVersion('1', versionFeedback); setVersionFeedback(''); setShowVersionFeedback(false) }
@@ -286,6 +304,11 @@ export default function Workspace() {
       setSelectedAct('')
       return
     }
+    if (generating || streamContent) {
+      disconnect()
+      setGenerating(false)
+    }
+    setConfirmedPhaseId(null)
     setSuppressStream(true)
     setSelectedPhase(index); setActFileList([]); setSelectedAct(''); setViewContent(''); setLoadingPhase(true)
     try {
@@ -487,7 +510,22 @@ export default function Workspace() {
                 )}
               </div>
             )}
-            {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && (
+            {awaitingProceed && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                <div className="max-w-3xl mx-auto flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-medium">已完成确认</span>
+                    <span className="text-muted-foreground">— 准备好后可继续下一步</span>
+                  </div>
+                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                    <Play className="w-4 h-4" /> 继续进行下一步
+                  </button>
+                </div>
+              </div>
+            )}
+            {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
                 <div className="max-w-3xl mx-auto flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">内容已生成完毕</p>
@@ -495,6 +533,29 @@ export default function Workspace() {
                      className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
                     返回浏览
                   </button>
+                </div>
+              </div>
+            )}
+            {contentWarnings.length > 0 && (
+              <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
+                <div className="max-w-3xl mx-auto">
+                  {contentWarnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-amber-400/10 border border-amber-400/20 mb-2">
+                      <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-medium text-amber-400 mb-1">内容量提醒 — 第{w.phase_index + 1}阶段</p>
+                        {w.warnings.map((msg, j) => (
+                          <p key={j} className="text-xs text-amber-400/80">{msg}</p>
+                        ))}
+                        {w.stats?.max_scenes && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            检测到约{w.stats.scene_count}场（目标建议≤{w.stats.max_scenes}场）
+                            · {w.stats.word_count}字（目标建议≤{w.stats.max_words}字）
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -515,6 +576,17 @@ export default function Workspace() {
               </div>
             )}
             <div className="max-w-3xl mx-auto">
+              {confirmedPhaseId !== null && (
+                <div className="mb-4 p-3 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-medium">已确认，下一阶段正在生成中</span>
+                  </div>
+                  <button onClick={handleProceed} className="px-4 py-1.5 rounded-lg bg-green-400/20 text-green-400 text-xs font-medium hover:bg-green-400/30 transition-colors">
+                    查看新内容
+                  </button>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold flex items-center gap-2">
                   <span>{PHASE_ICONS[selectedPhase]}</span>
@@ -542,9 +614,15 @@ export default function Workspace() {
                       <button onClick={handleEditContent} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
                         <Pencil className="w-3.5 h-3.5 inline mr-1" /> 编辑
                       </button>
-                      {!streamContent && (
+                      {!streamContent && !confirmedPhaseId && (
                         <button onClick={handleContinue} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap">
                           <Play className="w-3.5 h-3.5" /> 继续创作
+                        </button>
+                      )}
+                      {confirmedPhaseId !== null && (
+                        <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap"
+                          style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                          <Play className="w-3.5 h-3.5" /> 继续查看新内容
                         </button>
                       )}
                     </>
