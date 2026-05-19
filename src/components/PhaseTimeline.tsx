@@ -1,4 +1,5 @@
 import { ArrowLeft, Eye, ChevronDown, FolderOpen, Sparkles, RefreshCw } from 'lucide-react'
+import type { ChunkInfo } from '../hooks/useWebSocket'
 
 const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成']
 const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬']
@@ -21,6 +22,8 @@ interface Props {
   selectedAct: string
   showStream: boolean
   connected: boolean
+  autoApprove: boolean
+  chunksCompleted: Record<number, ChunkInfo[]>
   onNavigate: (path: string) => void
   onOpenFolder: () => void
   onShowTemplateModal: () => void
@@ -28,13 +31,14 @@ interface Props {
   onViewAct: (phaseIndex: number, act: string) => void
   onSetExpandedPhase: (index: number) => void
   onRedo: (index: number) => void
+  onAutoApproveChange: (value: boolean) => void
 }
 
 export default function PhaseTimeline({
   name, projectConfig, phases, currentPhase, streamContent, suppressStream,
   confirmedPhases, selectedPhase, expandedPhase, actFileList, selectedAct, showStream,
-  connected, onNavigate, onOpenFolder, onShowTemplateModal,
-  onViewPhase, onViewAct, onSetExpandedPhase, onRedo,
+  connected, autoApprove, chunksCompleted, onNavigate, onOpenFolder, onShowTemplateModal,
+  onViewPhase, onViewAct, onSetExpandedPhase, onRedo, onAutoApproveChange,
 }: Props) {
   const phaseStatus = (index: number) => {
     if (index === currentPhase && streamContent && !suppressStream) return 'active'
@@ -89,6 +93,9 @@ export default function PhaseTimeline({
                 <span className="flex-1">{pname}</span>
                 {s === 'active' && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-ping flex-shrink-0" />}
                 {s === 'done' && <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
+                {s !== 'active' && s !== 'done' && chunksCompleted[i]?.length > 0 && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                )}
                 {canView && (isSelected && hasActs ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 flex-shrink-0 transition-opacity" />)}
                 {s === 'done' && (
                   <button
@@ -114,19 +121,51 @@ export default function PhaseTimeline({
                   ))}
                 </div>
               )}
+              {/* 分集进度展示 */}
+              {chunksCompleted[i]?.length > 0 && i !== selectedPhase && i === currentPhase && (
+                <div className="ml-8 mt-1 mb-1 space-y-0.5 border-l-2 border-primary/20 pl-3">
+                  {Array.from({ length: chunksCompleted[i][0]?.total || 1 }, (_, idx) => {
+                    const done = chunksCompleted[i].find(c => c.index === idx)
+                    return (
+                      <div key={idx} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg text-muted-foreground">
+                        <button
+                          onClick={() => { if (done) { onViewAct(i, ''); onSetExpandedPhase(i) } }}
+                          className={`w-full text-left truncate transition-all ${done ? 'hover:text-green-400 cursor-pointer' : 'cursor-default'}`}
+                        >
+                          {done ? (
+                            <span className="text-green-400">✅ 第{idx + 1}集</span>
+                          ) : (
+                            <span className="text-muted-foreground">⏳ 第{idx + 1}集</span>
+                          )}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
 
-      <div className="p-4 border-t border-border/50">
-        <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
-          <span>总进度</span>
-          <span>{donePhaseCount}/{activePhaseCount}</span>
-        </div>
-        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-500 progress-glow"
-            style={{ width: `${(donePhaseCount / activePhaseCount) * 100}%`, background: 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }} />
+      <div className="p-4 border-t border-border/50 space-y-3">
+        <label className="flex items-center justify-between gap-2 cursor-pointer">
+          <span className="text-xs text-muted-foreground">自动审核（逐阶段）</span>
+          <div className="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" className="sr-only peer" checked={autoApprove}
+              onChange={(e) => onAutoApproveChange(e.target.checked)} />
+            <div className="w-8 h-4 bg-muted rounded-full peer peer-checked:bg-green-500/60 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:start-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all" />
+          </div>
+        </label>
+        <div>
+          <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
+            <span>总进度</span>
+            <span>{donePhaseCount}/{activePhaseCount}</span>
+          </div>
+          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-500 progress-glow"
+              style={{ width: `${(donePhaseCount / activePhaseCount) * 100}%`, background: 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }} />
+          </div>
         </div>
       </div>
     </aside>

@@ -67,56 +67,121 @@ class PlotExpander(AgentBase):
             return
 
         _outline_blocks = list(iterator.blocks)
-        _previous_outline_infos = []
+        self._outline_infos = []
 
         for ctx in iterator:
-            prompt = template.replace("{style_config}", style_context)
-            prompt = prompt.replace("{outline}", ctx.outline_section or outline)
-            prompt = prompt.replace("{writing_style}", writing_style_name)
-            prompt = prompt.replace("{screen_aspect}", screen_aspect_name)
-            duration_label = "自动（由Agent推荐）" if style.duration_mode == "1" else "自定义"
-            prompt = prompt.replace("{duration_mode}", duration_label)
-            prompt = prompt.replace("{episode_count}", style.episode_count or "（由AI根据大纲合理分配）")
-            prompt = prompt.replace("{episode_duration}", style.episode_duration or "（由AI根据故事类型推荐）")
-            prompt = prompt.replace("{episode_total_minutes}", _calc_total_minutes(style))
-            prompt = prompt.replace("{story_type}", story_type_name)
-
-            prev_outline_context = ""
-            if _previous_outline_infos:
-                prev_outline_context = "\n\n## 前序大纲回顾（你的剧情必须与此衔接）\n\n"
-                for act_name, act_outline in _previous_outline_infos:
-                    prev_outline_context += f"### {act_name} 大纲\n{act_outline[-1500:]}\n\n"
-
-            prev_plot_context = ""
-            if ctx.previous_full_texts:
-                prev_plot_context = "\n\n## 前序剧情回顾（你之前写的内容）\n\n"
-                for i, ft in enumerate(ctx.previous_full_texts):
-                    name = _previous_outline_infos[i][0] if i < len(_previous_outline_infos) else f"前序"
-                    prev_plot_context += f"### {name} 剧情（已生成）\n{ft[-1500:]}\n\n"
-
-            prompt += prev_outline_context
-            prompt += prev_plot_context
-
-            if ctx.summaries:
-                prompt += "\n\n## 关键元素追踪\n" + "\n".join(ctx.summaries)
-            prompt += f"\n\n请只写「{ctx.name}」的内容。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
-
-            if feedback and ctx.index == (iterator.plan.chunk_count or 1) - 1:
-                prompt += f"\n\n## 修改意见\n{feedback}"
-
-            chunk_output = ""
-            for token in self.call_llm_stream(prompt, "", temperature=0.8):
-                chunk_output += token
-                yield token
-
-            _previous_outline_infos.append((ctx.name, ctx.outline_section))
-
+            yield from self.generate_chunk(ctx, template, style_context, writing_style_name,
+                                           screen_aspect_name, story_type_name, style, plan,
+                                           outline, feedback=feedback)
+            chunk_output = getattr(self, '_last_chunk_output', '')
             if plan.summarize and chunk_output.strip():
-                summary = self._extract_summary(ctx.name, chunk_output)
+                summary = getattr(self, '_last_chunk_summary', '')
                 iterator.set_output(ctx.index, chunk_output, summary)
             else:
                 iterator.set_output(ctx.index, chunk_output)
         self._chunks = [{"name": b["name"], "output": b.get("_output", "")} for b in iterator.blocks]
+
+    def prepare_generation(self, project, style, input_content):
+        """为逐集生成做初始化准备，返回 (chunk_count, chunk_names)"""
+        template = self.load_prompt_template("plot_expander.txt")
+        confirmed_direction = ""
+        outline_content = project.read_output("01_故事大纲/故事大纲.md") or ""
+        direction_match = re.search(r'> ✅ 已选中版本[AB]。(差异摘要.*?)$', outline_content, re.MULTILINE)
+        if direction_match:
+            confirmed_direction = direction_match.group(1).strip()
+        if not confirmed_direction:
+            confirmed_direction = "（未设置）"
+        template = template.replace("{confirmed_direction}", confirmed_direction)
+        feedback = ""
+        if "## 修改意见" in input_content:
+            parts = input_content.split("## 修改意见")
+            outline = parts[0]
+            feedback = parts[1] if len(parts) > 1 else ""
+        else:
+            outline = input_content
+        style_context = self.get_style_context(style)
+        writing_style_name = WRITING_STYLES.get(style.writing_style, {}).get("name", "自动适配")
+        screen_aspect_name = SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "自适应")
+        story_type_name = STORY_TYPES.get(style.story_type, {}).get("name", "未知")
+        plan = ChunkStrategy.get_plan(style.story_type)
+        if plan.bible_mode:
+            self._bible_mode = True
+            return 0, []
+        pre_analyzed = ChunkStrategy.pre_analyze_split_points(outline, self.call_llm_stream)
+        iterator = ChunkIter(plan, outline, pre_analyzed)
+        if plan.chunk_count == 0:
+            count_prompt = (
+                f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
+                f"考虑故事的长度和复杂度。只输出一个整数，不要其他文字。\n\n"
+                f"{outline[:3000]}"
+            )
+            count_text = ""
+            for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
+                count_text += token
+            nums = re.findall(r'\d+', count_text)
+            chunk_count = int(nums[0]) if nums else 3
+            chunk_count = max(1, min(chunk_count, 20))
+            iterator.set_auto_blocks(chunk_count)
+        self._gen_template = template
+        self._gen_style_context = style_context
+        self._gen_writing_style_name = writing_style_name
+        self._gen_screen_aspect_name = screen_aspect_name
+        self._gen_story_type_name = story_type_name
+        self._gen_plan = plan
+        self._gen_iterator = iterator
+        self._gen_outline = outline
+        self._gen_feedback = feedback
+        self._outline_infos = []
+        chunk_count = len(iterator.blocks)
+        chunk_names = [b["name"] for b in iterator.blocks]
+        return chunk_count, chunk_names
+
+    def generate_chunk(self, ctx, template, style_context, writing_style_name,
+                       screen_aspect_name, story_type_name, style, plan, outline,
+                       feedback=""):
+        prompt = template.replace("{style_config}", style_context)
+        prompt = prompt.replace("{outline}", ctx.outline_section or outline)
+        prompt = prompt.replace("{writing_style}", writing_style_name)
+        prompt = prompt.replace("{screen_aspect}", screen_aspect_name)
+        duration_label = "自动（由Agent推荐）" if style.duration_mode == "1" else "自定义"
+        prompt = prompt.replace("{duration_mode}", duration_label)
+        prompt = prompt.replace("{episode_count}", style.episode_count or "（由AI根据大纲合理分配）")
+        prompt = prompt.replace("{episode_duration}", style.episode_duration or "（由AI根据故事类型推荐）")
+        prompt = prompt.replace("{episode_total_minutes}", _calc_total_minutes(style))
+        prompt = prompt.replace("{story_type}", story_type_name)
+
+        prev_outline_context = ""
+        if self._outline_infos:
+            prev_outline_context = "\n\n## 前序大纲回顾（你的剧情必须与此衔接）\n\n"
+            for act_name, act_outline in self._outline_infos:
+                prev_outline_context += f"### {act_name} 大纲\n{act_outline[-1500:]}\n\n"
+
+        prev_plot_context = ""
+        if ctx.previous_full_texts:
+            prev_plot_context = "\n\n## 前序剧情回顾（你之前写的内容）\n\n"
+            for i, ft in enumerate(ctx.previous_full_texts):
+                name = self._outline_infos[i][0] if i < len(self._outline_infos) else f"前序"
+                prev_plot_context += f"### {name} 剧情（已生成）\n{ft[-1500:]}\n\n"
+
+        prompt += prev_outline_context
+        prompt += prev_plot_context
+
+        if ctx.summaries:
+            prompt += "\n\n## 关键元素追踪\n" + "\n".join(ctx.summaries)
+        prompt += f"\n\n请只写「{ctx.name}」的内容。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+
+        if feedback and ctx.index == (plan.chunk_count or 1) - 1:
+            prompt += f"\n\n## 修改意见\n{feedback}"
+
+        self._last_chunk_output = ""
+        for token in self.call_llm_stream(prompt, "", temperature=0.8):
+            self._last_chunk_output += token
+            yield token
+
+        self._outline_infos.append((ctx.name, ctx.outline_section))
+
+        if plan.summarize and self._last_chunk_output.strip():
+            self._last_chunk_summary = self._extract_summary(ctx.name, self._last_chunk_output)
 
     def _resolve_auto_chunks(self, iterator, template, outline, style_context,
                                writing_style_name, screen_aspect_name,

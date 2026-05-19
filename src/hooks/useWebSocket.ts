@@ -11,6 +11,22 @@ export interface WSMessage {
   current?: number
   total?: number
   error?: string
+  chunk_name?: string
+  chunk_index?: number
+  total_chunks?: number
+}
+
+export interface ChunkInfo {
+  name: string
+  index: number
+  total: number
+}
+
+export interface EpisodeInfo {
+  phase_index: number
+  chunk_name: string
+  chunk_index: number
+  total_chunks: number
 }
 
 export function useWebSocket() {
@@ -29,6 +45,10 @@ export function useWebSocket() {
   const [isComplete, setIsComplete] = useState(false)
   const [streamDone, setStreamDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chunksCompleted, setChunksCompleted] = useState<Record<number, ChunkInfo[]>>({})
+  const [awaitingEpisodeApproval, setAwaitingEpisodeApproval] = useState(false)
+  const [currentEpisode, setCurrentEpisode] = useState<EpisodeInfo | null>(null)
+  const [confirmedPhaseIndex, setConfirmedPhaseIndex] = useState<number | null>(null)
 
   const cleanup = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -57,6 +77,9 @@ export function useWebSocket() {
     setAwaitingVersion(false)
     setAwaitingProceed(false)
     setContentWarnings([])
+    setChunksCompleted({})
+    setAwaitingEpisodeApproval(false)
+    setCurrentEpisode(null)
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
@@ -75,6 +98,8 @@ export function useWebSocket() {
           setCurrentPhase(msg.phase_index || 0)
           setStreamContent('')
           setStreamDone(false)
+          setAwaitingApproval(false)
+          setAwaitingVersion(false)
           setPhases(prev => {
             const next = [...prev]
             if (msg.phase_index !== undefined) {
@@ -98,11 +123,7 @@ export function useWebSocket() {
             }
             return next
           })
-          if (msg.phase_index === 0) {
-            setAwaitingVersion(true)
-          } else {
-            setAwaitingApproval(true)
-          }
+          setAwaitingApproval(true)
           break
         case 'awaiting_approval':
           setAwaitingApproval(true)
@@ -118,7 +139,33 @@ export function useWebSocket() {
           break
         case 'version_applied':
           setAwaitingVersion(false)
-          setStreamContent('')
+          break
+        case 'phase_confirmed':
+          setConfirmedPhaseIndex(msg.phase_index ?? null)
+          setStreamDone(true)
+          setAwaitingEpisodeApproval(false)
+          break
+        case 'chunk_saved':
+          if (msg.phase_index !== undefined && msg.chunk_name) {
+            setChunksCompleted(prev => {
+              const pi = msg.phase_index!
+              const chunks = [...(prev[pi] || [])]
+              chunks.push({ name: msg.chunk_name!, index: msg.chunk_index ?? 0, total: msg.total_chunks ?? 1 })
+              return { ...prev, [pi]: chunks }
+            })
+          }
+          break
+        case 'episode_complete':
+          setAwaitingEpisodeApproval(true)
+          setStreamDone(true)
+          if (msg.phase_index !== undefined && msg.chunk_name) {
+            setCurrentEpisode({
+              phase_index: msg.phase_index,
+              chunk_name: msg.chunk_name,
+              chunk_index: msg.chunk_index ?? 0,
+              total_chunks: msg.total_chunks ?? 1,
+            })
+          }
           break
         case 'all_complete':
           setIsComplete(true)
@@ -202,9 +249,33 @@ export function useWebSocket() {
     setStreamDone(false)
   }, [send])
 
+  const episodeApprove = useCallback(() => {
+    send({ action: 'episode_approve' })
+    setAwaitingEpisodeApproval(false)
+    setStreamDone(false)
+  }, [send])
+
+  const episodeConfirm = useCallback(() => {
+    send({ action: 'episode_confirm' })
+    setAwaitingEpisodeApproval(false)
+    setStreamDone(false)
+  }, [send])
+
+  const episodeRevise = useCallback((feedback: string) => {
+    send({ action: 'episode_revise', feedback })
+    setAwaitingEpisodeApproval(false)
+    setStreamDone(false)
+  }, [send])
+
+  const clearConfirmedPhase = useCallback(() => {
+    setConfirmedPhaseIndex(null)
+  }, [])
+
   return {
     connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream,
+    episodeApprove, episodeConfirm, episodeRevise,
     connected, streamContent, currentPhase, phases,
-    progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error,
+    progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error, chunksCompleted,
+    awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase,
   }
 }

@@ -136,5 +136,23 @@ class ChunkIter:
                 blk["_summary"] = summary
                 break
 
+    def get_chunk_context(self, index):
+        for blk in self.blocks:
+            if blk["index"] == index:
+                prev_indices = sorted([b["index"] for b in self.blocks if b.get("_output") and b["index"] < index])
+                prev_texts = [self.blocks[pi].get("_output", "") for pi in prev_indices]
+                prev_summaries = [self.blocks[pi].get("_summary", "") for pi in prev_indices]
+                if self.plan.context_window > 0:
+                    prev_texts = prev_texts[-self.plan.context_window:]
+                    prev_summaries = prev_summaries[-self.plan.context_window:]
+                return ChunkContext(
+                    index=blk["index"],
+                    name=blk["name"],
+                    outline_section=blk["content"],
+                    previous_full_texts=prev_texts,
+                    summaries=prev_summaries,
+                )
+        return None
+
     def get_all_outputs(self) -> List[dict]:
         return [{"name": b["name"], "output": b.get("_output", "")} for b in self.blocks]

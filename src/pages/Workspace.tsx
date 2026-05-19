@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Play, Check, Pencil, X, Loader2, Settings, Sparkles, RefreshCw, ArrowLeft, Zap } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { fetchProject, fetchPhaseContent, openProjectFolder, saveProjectTemplate } from '../lib/api'
+import { fetchProject, fetchPhaseContent, openProjectFolder, saveProjectTemplate, updateProjectConfig } from '../lib/api'
 import TemplateModal from '../components/TemplateModal'
 import PhaseTimeline from '../components/PhaseTimeline'
 import ReactMarkdown from 'react-markdown'
@@ -18,6 +18,8 @@ export default function Workspace() {
   const [projectConfig, setProjectConfig] = useState<any>(null)
   const [feedbackText, setFeedbackText] = useState('')
   const [showFeedback, setShowFeedback] = useState(false)
+  const [episodeFeedbackText, setEpisodeFeedbackText] = useState('')
+  const [showEpisodeFeedback, setShowEpisodeFeedback] = useState(false)
   const [started, setStarted] = useState(false)
   const [pendingStart, setPendingStart] = useState(false)
   const [selectedPhase, setSelectedPhase] = useState(-1)
@@ -45,17 +47,19 @@ export default function Workspace() {
   const [currentPhaseMaxChars, setCurrentPhaseMaxChars] = useState(0)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [generating, setGenerating] = useState(false)
+  const [autoApprove, setAutoApprove] = useState(false)
   const [confirmedPhases, setConfirmedPhases] = useState<number[]>([])
   const [confirmedPhaseId, setConfirmedPhaseId] = useState<number | null>(null)
   const streamHadContent = useRef(false)
 
-  const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error } = useWebSocket()
+  const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, chunksCompleted, error, episodeApprove, episodeConfirm, episodeRevise, awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase } = useWebSocket()
 
 
   useEffect(() => {
     if (!name) return
     fetchProject(name).then(config => {
       setProjectConfig(config)
+      setAutoApprove(config.auto_approve === true)
       const phs = config.phases || []
       if (phs.some((p: any) => p.done)) setStarted(true)
       if (typeof config.pending_approval === 'number' && config.pending_approval >= 0) {
@@ -218,7 +222,6 @@ export default function Workspace() {
     setSuppressStream(false)
   }
   const handleRevise = () => { if (!feedbackText.trim()) return; revise(currentPhase, feedbackText); setFeedbackText(''); setShowFeedback(false) }
-  const handleReject = () => { reject(currentPhase, '不满意') }
   const handleVersionA = () => { selectVersion('1', versionFeedback); setVersionFeedback(''); setShowVersionFeedback(false) }
   const handleVersionB = () => { selectVersion('2', versionFeedback); setVersionFeedback(''); setShowVersionFeedback(false) }
   const handleVersionMix = () => { if (!mixFeedback.trim()) return; selectVersion('3', mixFeedback); setMixFeedback(''); setShowMixInput(false) }
@@ -228,6 +231,8 @@ export default function Workspace() {
     clearStream()
     setSuppressStream(false)
     setShowRedoInput(false)
+    setConfirmedPhaseId(null)
+    setConfirmedPhases(prev => prev.filter(i => i !== index))
     if (connected) {
       send({
         action: 'redo_phase',
@@ -256,7 +261,10 @@ export default function Workspace() {
     setActFileList([])
     setShowMixInput(false)
     if (index < 5) {
-      projectConfig.phases[index].done = false
+      // 将当前阶段及所有下游阶段标记为未完成
+      for (let i = index; i < projectConfig.phases.length; i++) {
+        projectConfig.phases[i].done = false
+      }
       setProjectConfig({ ...projectConfig })
     }
   }
@@ -353,6 +361,8 @@ export default function Workspace() {
         selectedAct={selectedAct}
         showStream={!suppressStream && connected && streamContent}
         connected={connected}
+        autoApprove={autoApprove}
+        chunksCompleted={chunksCompleted}
         onNavigate={navigate}
         onOpenFolder={() => openProjectFolder(name!)}
         onShowTemplateModal={() => setShowTemplateModal(true)}
@@ -360,6 +370,11 @@ export default function Workspace() {
         onViewAct={handleViewAct}
         onSetExpandedPhase={setExpandedPhase}
         onRedo={(i) => { setRedoPhaseIndex(i); setRedoInstruction(''); setShowRedoInput(true) }}
+        onAutoApproveChange={(v) => {
+          setAutoApprove(v)
+          if (name) updateProjectConfig(name, { auto_approve: v })
+          send({ action: 'set_auto_approve', value: v })
+        }}
       />
 
       {/* Main */}
@@ -440,12 +455,19 @@ export default function Workspace() {
                     <span>{formatTime(elapsedSeconds)} {(() => { const r = calcRemaining(); return r ? `| 预计剩余${formatTime(r)}` : '' })()}</span>
                   </div>
                 </div>
-                {connected && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" title="已连接" />}
+                <div className="flex items-center gap-2">
+                  {connected && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" title="已连接" />}
+                  {streamDone && !awaitingApproval && !awaitingVersion && !awaitingEpisodeApproval && (
+                    <button onClick={() => { setViewContent(streamContent); setSelectedPhase(currentPhase); setSuppressStream(true) }} className="px-3 py-1.5 rounded-lg border border-border text-xs hover:bg-muted transition-colors">
+                      返回浏览
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-8" style={{ opacity: 1 }}>
               <div className="max-w-3xl mx-auto">
-                {streamContent.length > 10 && (
+                {streamContent.length > 10 && !streamDone && (
                   <div className="mb-3 text-xs text-muted-foreground border-l-2 border-primary/30 pl-3 py-1">
                     AI 正在逐字生成内容... 已耗时 {formatTime(elapsedSeconds)}
                   </div>
@@ -456,10 +478,10 @@ export default function Workspace() {
                 </div>
               </div>
             </div>
-            {awaitingVersion && (
+             {awaitingVersion && (
               <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
                 <div className="max-w-3xl mx-auto">
-                  <p className="text-sm font-medium mb-4">🎯 大纲已生成，请选择版本：</p>
+                  <p className="text-sm font-medium mb-4">🎯 方向卡已生成，请选择版本：</p>
                   {showMixInput ? (
                     <div className="space-y-3">
                       <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-24 resize-none text-sm" placeholder="请描述你希望如何混合版本A和版本B..." value={mixFeedback} onChange={e => setMixFeedback(e.target.value)} autoFocus />
@@ -503,9 +525,6 @@ export default function Workspace() {
                     <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
                       <Pencil className="w-4 h-4" /> 修改
                     </button>
-                    <button onClick={handleReject} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm text-red-400 hover:bg-red-400/5 transition-all">
-                      <X className="w-4 h-4" /> 退回
-                    </button>
                   </div>
                 )}
               </div>
@@ -525,7 +544,7 @@ export default function Workspace() {
                 </div>
               </div>
             )}
-            {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && (
+            {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && !awaitingEpisodeApproval && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
                 <div className="max-w-3xl mx-auto flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">内容已生成完毕</p>
@@ -534,6 +553,46 @@ export default function Workspace() {
                     返回浏览
                   </button>
                 </div>
+              </div>
+            )}
+            {awaitingEpisodeApproval && currentEpisode && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up"
+                style={{ borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+                {showEpisodeFeedback ? (
+                  <div className="max-w-3xl mx-auto space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
+                      <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
+                      <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
+                    </div>
+                    <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={episodeFeedbackText} onChange={e => setEpisodeFeedbackText(e.target.value)} autoFocus />
+                    <div className="flex gap-2">
+                      <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
+                        <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-3xl mx-auto">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
+                      <span className="text-muted-foreground">— 请选择下一步操作</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={episodeApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+                        style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))', color: 'white' }}>
+                        <Check className="w-4 h-4" /> 通过并生成下一集
+                      </button>
+                      <button onClick={episodeConfirm} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all border-2 border-primary/40 text-primary hover:bg-primary/5">
+                        <Check className="w-4 h-4" /> 完成
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                        <Pencil className="w-4 h-4" /> 修改
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {contentWarnings.length > 0 && (
@@ -559,11 +618,25 @@ export default function Workspace() {
                 </div>
               </div>
             )}
+            {confirmedPhaseIndex !== null && !awaitingEpisodeApproval && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                <div className="max-w-3xl mx-auto flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-medium">阶段已确认，内容已保存</span>
+                  </div>
+                  <button onClick={() => { clearConfirmedPhase(); handleContinue() }} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                    <Play className="w-4 h-4" /> 继续创作
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ) : viewContent ? (
-          <div className="flex-1 overflow-y-auto p-8 animate-fade-in">
+          <><div className="flex-1 overflow-y-auto p-8 animate-fade-in">
             {/* 生成中的横幅提示 */}
-            {streamContent && (
+            {streamContent && !confirmedPhaseId && (
               <div className="mb-4 p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -580,10 +653,10 @@ export default function Workspace() {
                 <div className="mb-4 p-3 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-green-400" />
-                    <span className="text-green-400 font-medium">已确认，下一阶段正在生成中</span>
+                    <span className="text-green-400 font-medium">已确认，内容已保存</span>
                   </div>
-                  <button onClick={handleProceed} className="px-4 py-1.5 rounded-lg bg-green-400/20 text-green-400 text-xs font-medium hover:bg-green-400/30 transition-colors">
-                    查看新内容
+                  <button onClick={handleContinue} className="px-4 py-1.5 rounded-lg bg-green-400/20 text-green-400 text-xs font-medium hover:bg-green-400/30 transition-colors">
+                    继续创作
                   </button>
                 </div>
               )}
@@ -606,23 +679,12 @@ export default function Workspace() {
                     </>
                   ) : (
                     <>
-                      {streamContent ? (
-                        <button onClick={() => setSuppressStream(false)} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
-                          ← 返回生成进度
-                        </button>
-                      ) : null}
                       <button onClick={handleEditContent} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
                         <Pencil className="w-3.5 h-3.5 inline mr-1" /> 编辑
                       </button>
                       {!streamContent && !confirmedPhaseId && (
                         <button onClick={handleContinue} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap">
                           <Play className="w-3.5 h-3.5" /> 继续创作
-                        </button>
-                      )}
-                      {confirmedPhaseId !== null && (
-                        <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap"
-                          style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
-                          <Play className="w-3.5 h-3.5" /> 继续查看新内容
                         </button>
                       )}
                     </>
@@ -643,9 +705,65 @@ export default function Workspace() {
               )}
             </div>
           </div>
-        ) : connected && currentPhase >= 0 && !viewContent ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
+            {awaitingEpisodeApproval && currentEpisode && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up"
+                style={{ borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+                {showEpisodeFeedback ? (
+                  <div className="max-w-3xl mx-auto space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
+                      <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
+                      <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
+                    </div>
+                    <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={episodeFeedbackText} onChange={e => setEpisodeFeedbackText(e.target.value)} autoFocus />
+                    <div className="flex gap-2">
+                      <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
+                        <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-3xl mx-auto">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
+                      <span className="text-muted-foreground">— 请选择下一步操作</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={episodeApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+                        style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))', color: 'white' }}>
+                        <Check className="w-4 h-4" /> 通过并生成下一集
+                      </button>
+                      <button onClick={episodeConfirm} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all border-2 border-primary/40 text-primary hover:bg-primary/5">
+                        <Check className="w-4 h-4" /> 完成
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                        <Pencil className="w-4 h-4" /> 修改
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {awaitingProceed && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                <div className="max-w-3xl mx-auto flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-medium">已完成确认</span>
+                    <span className="text-muted-foreground">— 准备好后可继续下一步</span>
+                  </div>
+                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                    <Play className="w-4 h-4" /> 继续进行下一步
+                  </button>
+                </div>
+              </div>
+            )}
+           </>
+         ) : connected && currentPhase >= 0 && !viewContent ? (
+           <><div className="flex-1 flex flex-col overflow-hidden">
+              <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
               <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 text-sm">
                   <span>{PHASE_ICONS[currentPhase] || '📝'}</span>
@@ -686,7 +804,137 @@ export default function Workspace() {
                  )}
                </div>
              </div>
+            {awaitingVersion && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                <div className="max-w-3xl mx-auto">
+                  <p className="text-sm font-medium mb-4">🎯 方向卡已生成，请选择版本：</p>
+                  {showMixInput ? (
+                    <div className="space-y-3">
+                      <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-24 resize-none text-sm" placeholder="请描述你希望如何混合版本A和版本B..." value={mixFeedback} onChange={e => setMixFeedback(e.target.value)} autoFocus />
+                      <div className="flex gap-2">
+                        <button onClick={handleVersionMix} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium"><Sparkles className="w-4 h-4 inline mr-1" />提交混合</button>
+                        <button onClick={() => setShowMixInput(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-24 resize-none text-sm" placeholder="可选：输入修改要求，选中的版本将根据你的要求重新生成（如：增加第3个角色、把结局改成悲剧、加快节奏...）" value={versionFeedback} onChange={e => setVersionFeedback(e.target.value)} />
+                      <div className="flex items-center gap-3">
+                        <button onClick={handleVersionA} className="btn-gradient px-6 py-3 rounded-xl text-sm font-medium">版本 A</button>
+                        <button onClick={handleVersionB} className="btn-gradient px-6 py-3 rounded-xl text-sm font-medium">版本 B</button>
+                        <button onClick={() => setShowMixInput(true)} className="px-5 py-3 rounded-xl border-2 border-border text-sm font-medium hover:border-primary/50 hover:bg-primary/5 transition-all">混合 A + B</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {awaitingApproval && !isComplete && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                {showFeedback ? (
+                  <div className="max-w-3xl mx-auto space-y-3">
+                    <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={feedbackText} onChange={e => setFeedbackText(e.target.value)} autoFocus />
+                    <div className="flex gap-2">
+                      <button onClick={handleRevise} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium"><Pencil className="w-4 h-4 inline mr-1" />提交修改</button>
+                      <button onClick={() => setShowFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-3xl mx-auto flex items-center gap-2">
+                    <button onClick={handleApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+                      style={{ background: 'hsl(150, 60%, 50%)', color: 'white' }}>
+                      <Check className="w-4 h-4" /> 通过并进行下一步
+                    </button>
+                    <button onClick={handleConfirm} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all border-2 border-primary/40 text-primary hover:bg-primary/5">
+                      <Check className="w-4 h-4" /> 确认
+                    </button>
+                    <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                      <Pencil className="w-4 h-4" /> 修改
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {awaitingProceed && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up">
+                <div className="max-w-3xl mx-auto flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-green-400" />
+                    <span className="text-green-400 font-medium">已完成确认</span>
+                    <span className="text-muted-foreground">— 准备好后可继续下一步</span>
+                  </div>
+                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                    <Play className="w-4 h-4" /> 继续进行下一步
+                  </button>
+                </div>
+              </div>
+            )}
+            {awaitingEpisodeApproval && currentEpisode && (
+              <div className="border-t border-border/50 p-5 bg-card/80 backdrop-blur-sm animate-fade-in-up"
+                style={{ borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+                {showEpisodeFeedback ? (
+                  <div className="max-w-3xl mx-auto space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
+                      <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
+                      <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
+                    </div>
+                    <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={episodeFeedbackText} onChange={e => setEpisodeFeedbackText(e.target.value)} autoFocus />
+                    <div className="flex gap-2">
+                      <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
+                        <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-3xl mx-auto">
+                    <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
+                      <span className="text-muted-foreground">— 请选择下一步操作</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={episodeApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+                        style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))', color: 'white' }}>
+                        <Check className="w-4 h-4" /> 通过并生成下一集
+                      </button>
+                      <button onClick={episodeConfirm} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all border-2 border-primary/40 text-primary hover:bg-primary/5">
+                        <Check className="w-4 h-4" /> 完成
+                      </button>
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                        <Pencil className="w-4 h-4" /> 修改
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {contentWarnings.length > 0 && (
+              <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
+                <div className="max-w-3xl mx-auto">
+                  {contentWarnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-amber-400/10 border border-amber-400/20 mb-2">
+                      <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+                      <div className="flex-1">
+                        <p className="text-xs font-medium text-amber-400 mb-1">内容量提醒 — 第{w.phase_index + 1}阶段</p>
+                        {w.warnings.map((msg, j) => (
+                          <p key={j} className="text-xs text-amber-400/80">{msg}</p>
+                        ))}
+                        {w.stats?.max_scenes && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            检测到约{w.stats.scene_count}场（目标建议≤{w.stats.max_scenes}场）
+                            · {w.stats.word_count}字（目标建议≤{w.stats.max_words}字）
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
            </div>
+           </>
          ) : continuing ? (
            <div className="flex-1 flex flex-col overflow-hidden">
              <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">

@@ -10,6 +10,7 @@ export interface StyleConfig {
   art_style: string
   screen_aspect: string
   script_style: string
+  script_format: string
   duration_mode: string
   episode_count: string
   episode_duration: string
@@ -93,6 +94,15 @@ export async function createProject(payload: CreateProjectPayload): Promise<{ na
 
 export async function deleteProject(name: string): Promise<void> {
   await fetch(`${BASE}/projects/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+export async function updateProjectConfig(name: string, config: Record<string, any>): Promise<{ updated: boolean }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  return res.json()
 }
 
 export async function generateRandomIdea(style: StyleConfig): Promise<string> {

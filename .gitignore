@@ -19,3 +19,5 @@ aggregated_configs.json
 .build-errors.txt
 
 .node/
+*.bak
+*.bak2

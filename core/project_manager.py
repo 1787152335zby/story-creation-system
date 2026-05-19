@@ -58,6 +58,7 @@ class ProjectManager:
             ],
             "pending_approval": -1,
             "pending_version": -1,
+            "auto_approve": False,
         }
 
     def save_config(self):
@@ -88,6 +89,32 @@ class ProjectManager:
 
     def clear_pending_version(self):
         self.config["pending_version"] = -1
+        self.save_config()
+
+    @property
+    def auto_approve(self) -> bool:
+        return self.config.get("auto_approve", False)
+
+    def set_auto_approve(self, value: bool):
+        self.config["auto_approve"] = value
+        self.save_config()
+
+    @property
+    def pending_episode(self) -> Optional[dict]:
+        return self.config.get("pending_episode")
+
+    def set_pending_episode(self, phase_index: int, chunk_index: int, chunk_name: str, total_chunks: int, chunk_files=None):
+        self.config["pending_episode"] = {
+            "phase_index": phase_index,
+            "chunk_index": chunk_index,
+            "chunk_name": chunk_name,
+            "total_chunks": total_chunks,
+            "chunk_files": chunk_files or [],
+        }
+        self.save_config()
+
+    def clear_pending_episode(self):
+        self.config.pop("pending_episode", None)
         self.save_config()
 
     def write_output(self, filename: str, content: str) -> Path:

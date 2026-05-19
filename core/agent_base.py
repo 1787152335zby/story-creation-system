@@ -72,34 +72,60 @@ class AgentBase:
                 break
             yield chunk
 
-    def call_llm_stream_with_continuation(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_rounds: int = 8):
-        """流式调用 LLM，自动检测内容是否完整，不完整则自动续写。
-        用 system_prompt 传递续写上下文，保持 user_prompt 始终为空，
-        避免 LLM 因为看到新的 user 消息而"跳出角色"写元文本。
+    def call_llm_stream_with_continuation(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_rounds: int = 8, end_markers: list = None, continuation_prompt: str = ""):
+        """流式调用 LLM，支持自定义结束标记检测。
+
+        Args:
+            end_markers: 自定义结束标记列表，如果检测到这些标记则立即停止输出
+            continuation_prompt: 当遇到自定义结束标记时的续写提示，为空时不自动续写
         """
         full_output = ""
+        custom_end_markers = end_markers or []
+
+        if custom_end_markers:
+            all_end_markers = custom_end_markers
+        else:
+            all_end_markers = list(self.END_MARKERS)
+
+        found_end = False
+
         for attempt in range(max_rounds):
+            if found_end:
+                break
+
             current_system = system_prompt
-            if attempt > 0:
-                current_system = system_prompt + (
-                    f"\n\n---[续写指示]---\n"
-                    f"你已生成了部分内容，最后2000字如下：\n"
-                    f"{full_output[-2000:]}\n\n"
-                    f"请直接继续输出后续内容，不要做任何额外说明、不要打招呼、不要写'好的'等。"
-                    f"全部完成后输出【全片完】。"
-                )
-            round_buffer = ""
+            if attempt > 0 and continuation_prompt:
+                current_system = system_prompt + continuation_prompt
+
             for chunk in self.llm.backend.chat_stream(current_system, "", temperature):
-                round_buffer += chunk
+                if found_end:
+                    break
+
                 full_output += chunk
                 yield chunk
 
-            has_end = any(marker in round_buffer for marker in self.END_MARKERS)
-            if has_end:
+                # 实时检测结束标记，找到立即停止
+                if custom_end_markers:
+                    for marker in custom_end_markers:
+                        if marker in full_output:
+                            found_end = True
+                            break
+                    if found_end:
+                        break
+
+            # 只要找到结束标记，立即停止所有循环
+            if found_end:
                 break
 
-            if attempt == max_rounds - 1:
-                yield "\n\n> ⚠️ 注意：输出可能因长度限制被截断，建议审核后决定是否继续。"
+            # 如果没有自定义结束标记，检查默认结束标记
+            if not custom_end_markers:
+                round_has_end = any(marker in full_output[-500:] for marker in all_end_markers)
+                if round_has_end:
+                    break
+
+        # 只有当没有找到结束标记，并且是最后一轮时，才显示截断警告
+        if not found_end and attempt == max_rounds - 1 and not custom_end_markers:
+            yield "\n\n> ⚠️ 注意：输出可能因长度限制被截断，建议审核后决定是否继续。"
 
     def run(self, project: ProjectManager, style: StyleConfig, input_content: str) -> str:
         raise NotImplementedError

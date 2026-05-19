@@ -10,6 +10,7 @@ class StyleConfigRequest(BaseModel):
     art_style: str
     screen_aspect: str
     script_style: str
+    script_format: str = ""
     duration_mode: str
     episode_count: str = ""
     episode_duration: str = ""

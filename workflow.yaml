@@ -41,4 +41,4 @@ phases:
     output: 06_提示词/
     condition: "story_type in ['1', '2', '3']"
     auto_skip: false
-    split: true
+    split: false

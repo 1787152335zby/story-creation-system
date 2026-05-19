@@ -114,6 +114,7 @@ def create_project(req: CreateProjectRequest):
     project.config["art_style"] = req.style.art_style
     project.config["screen_aspect"] = req.style.screen_aspect
     project.config["script_style"] = req.style.script_style
+    project.config["script_format"] = req.style.script_format
     project.config["duration_mode"] = req.style.duration_mode
     project.config["episode_count"] = req.style.episode_count
     project.config["episode_duration"] = req.style.episode_duration
@@ -383,6 +384,7 @@ def save_project_as_template(name: str, template_name: str = ""):
         "art_style": config.get("art_style", ""),
         "screen_aspect": config.get("screen_aspect", ""),
         "script_style": config.get("script_style", ""),
+        "script_format": config.get("script_format", ""),
         "duration_mode": config.get("duration_mode", "1"),
         "custom_requirements": "",
     }

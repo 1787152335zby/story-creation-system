@@ -81,6 +81,11 @@ DURATION_OPTIONS = {
     "2": {"name": "自定义时长", "desc": "手动输入单集时长和总集数"},
 }
 
+SCRIPT_FORMATS = {
+    "1": {"name": "系统格式", "desc": "适合内部创作和AI分镜生成"},
+    "2": {"name": "市场格式", "desc": "适合对外交付和专业合作，符合行业标准"},
+}
+
 
 class StyleConfig:
     def __init__(self):
@@ -91,6 +96,7 @@ class StyleConfig:
         self.art_style: str = ""
         self.screen_aspect: str = ""
         self.script_style: str = ""
+        self.script_format: str = ""
         self.duration_mode: str = ""
         self.episode_count: str = ""
         self.episode_duration: str = ""
@@ -108,6 +114,7 @@ class StyleConfig:
             "art_style": self.art_style,
             "screen_aspect": self.screen_aspect,
             "script_style": self.script_style,
+            "script_format": self.script_format,
             "duration_mode": self.duration_mode,
             "episode_count": self.episode_count,
             "episode_duration": self.episode_duration,
@@ -128,6 +135,7 @@ class StyleConfig:
             f"art_style: {_name(RENDER_STYLES, self.art_style)}",
             f"screen_aspect: {_name(SCREEN_ASPECTS, self.screen_aspect)}",
             f"script_style: {_name(SCRIPT_STYLES, self.script_style)}",
+            f"script_format: {_name(SCRIPT_FORMATS, self.script_format)}",
             f"duration_mode: {self.duration_mode}",
         ]
         if self.episode_count:
@@ -154,6 +162,7 @@ class StyleConfig:
         config.art_style = data.get("art_style", "")
         config.screen_aspect = data.get("screen_aspect", "")
         config.script_style = data.get("script_style", "")
+        config.script_format = data.get("script_format", "")
         config.duration_mode = data.get("duration_mode", "")
         config.episode_count = data.get("episode_count", "")
         config.episode_duration = data.get("episode_duration", "")

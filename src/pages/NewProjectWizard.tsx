@@ -15,6 +15,7 @@ const VISUAL_STYLES: Record<string, string> = { '1': '好莱坞大片风', '2': 
 const RENDER_STYLES: Record<string, string> = { '1': '写实/真人', '2': '2D 动画', '3': '3D CG', '4': '卡通/风格化', '5': '水墨/国风', '6': '像素/复古', '7': '自动适配' }
 const SCREEN_ASPECTS: Record<string, string> = { '1': '9:16 竖屏', '2': '16:9 横屏', '3': '自适应' }
 const SCRIPT_STYLES: Record<string, string> = { '1': '视觉化写作', '2': '对白驱动型', '3': '文学剧本型', '4': '自动适配' }
+const SCRIPT_FORMATS: Record<string, string> = { '1': '系统格式', '2': '市场格式' }
 const MOOD_TAGS = [
   '悬疑紧张', '轻松治愈', '热血激昂', '阴冷压抑', '温暖感人',
   '幽默诙谐', '黑暗深沉', '文艺清新', '史诗宏大', '诡异迷幻',
@@ -24,7 +25,7 @@ const MOOD_TAGS = [
 export default function NewProjectWizard() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
-  const [style, setStyle] = useState<StyleConfig>({ story_type: '', genre: '', writing_style: '', visual_style: '', art_style: '', screen_aspect: '', script_style: '', duration_mode: '1', episode_count: '', episode_duration: '', custom_requirements: '', visual_reference: '', action_reference: '' })
+  const [style, setStyle] = useState<StyleConfig>({ story_type: '', genre: '', writing_style: '', visual_style: '', art_style: '', screen_aspect: '', script_style: '', script_format: '', duration_mode: '1', episode_count: '', episode_duration: '', custom_requirements: '', visual_reference: '', action_reference: '' })
   const [storyIdea, setStoryIdea] = useState('')
   const [projectName, setProjectName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -63,6 +64,7 @@ export default function NewProjectWizard() {
       art_style: t.art_style || '',
       screen_aspect: t.screen_aspect || '',
       script_style: t.script_style || '',
+      script_format: t.script_format || '',
       duration_mode: t.duration_mode || '1',
     }))
     if (t.genre) setSelectedGenres(t.genre.split(',').filter(Boolean))
@@ -213,6 +215,7 @@ export default function NewProjectWizard() {
                 ['视觉/叙事风格', VISUAL_STYLES, 'visual_style'],
                 ['渲染画风', RENDER_STYLES, 'art_style'],
                 ['剧本写作风格', SCRIPT_STYLES, 'script_style'],
+                ['剧本格式', SCRIPT_FORMATS, 'script_format'],
                 ['画面比例', SCREEN_ASPECTS, 'screen_aspect'],
               ].map(([label, options, field]) => (
                 <div key={field}>

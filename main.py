@@ -12,7 +12,7 @@ load_dotenv()
 
 from core.cli import console, print_banner, show_menu, notify_complete, wait_for_approval
 from core.project_manager import ProjectManager, get_projects_list
-from core.style_config import STORY_TYPES, GENRE_TAGS, MOOD_TAGS, WRITING_STYLES, VISUAL_STYLES, RENDER_STYLES, SCREEN_ASPECTS, SCRIPT_STYLES, DURATION_OPTIONS, StyleConfig
+from core.style_config import STORY_TYPES, GENRE_TAGS, MOOD_TAGS, WRITING_STYLES, VISUAL_STYLES, RENDER_STYLES, SCREEN_ASPECTS, SCRIPT_STYLES, DURATION_OPTIONS, SCRIPT_FORMATS, StyleConfig
 from core.cli import select_option, show_progress
 from core.back_to_menu import BackToMenu
 from agents.orchestrator import Orchestrator
@@ -64,6 +64,11 @@ def cmd_start():
         "🎭 请选择剧本写作风格：",
         [(k, f"{v['name']} - {v['desc']}") for k, v in SCRIPT_STYLES.items()],
         allow_custom=True
+    )
+
+    script_format_id = select_option(
+        "📄 请选择剧本格式：",
+        [(k, f"{v['name']} - {v['desc']}") for k, v in SCRIPT_FORMATS.items()]
     )
 
     screen_id = select_option(
@@ -131,6 +136,7 @@ def cmd_start():
     style.art_style = art_id
     style.screen_aspect = screen_id
     style.script_style = script_id
+    style.script_format = script_format_id
     style.duration_mode = "自动" if duration_id == "1" else "自定义"
     style.episode_count = episode_count
     style.episode_duration = episode_duration
@@ -171,6 +177,9 @@ def cmd_start():
 {f"## 视觉参考\n{visual_ref}\n" if visual_ref else ""}{f"## 动作参考\n{action_ref}\n" if action_ref else ""}## 剧本写作风格
 {SCRIPT_STYLES[script_id]['name']}
 
+## 剧本格式
+{SCRIPT_FORMATS[script_format_id]['name']}
+
 ## 画面比例
 {SCREEN_ASPECTS[screen_id]['name']}
 
@@ -191,6 +200,7 @@ def cmd_start():
     project.config["art_style"] = art_id
     project.config["screen_aspect"] = screen_id
     project.config["script_style"] = script_id
+    project.config["script_format"] = script_format_id
     project.config["visual_reference"] = visual_ref
     project.config["action_reference"] = action_ref
     project.save_config()

@@ -117,40 +117,13 @@ class Storyboarder(AgentBase):
         iterator = ChunkIter(plan, full_plot)
 
         if plan.chunk_count > 0 and plan.chunk_names:
-            _previous_full_plot_texts = []
+            self._plot_texts = []
 
             for ctx in iterator:
-                prompt = template.replace("{style_config}", style_context)
-                prompt = prompt.replace("{full_plot}", ctx.outline_section or full_plot)
-                prompt = prompt.replace("{visual_style}", visual_style_name)
-                prompt = prompt.replace("{screen_aspect}", screen_aspect_name)
-
-                prev_full_plot_context = ""
-                if _previous_full_plot_texts:
-                    prev_full_plot_context = "\n\n## 前序剧本回顾（必须与此衔接，保持人物/事件/场景一致）\n\n"
-                    for i, pp in enumerate(_previous_full_plot_texts):
-                        prev_full_plot_context += f"{pp[-2000:]}\n\n"
-
-                prev_storyboard_context = ""
-                if ctx.previous_full_texts:
-                    prev_storyboard_context = "\n\n## 前序分镜回顾（你之前的分镜输出，保持格式和衔接一致性）\n\n"
-                    for ft in ctx.previous_full_texts:
-                        prev_storyboard_context += ft[-1500:] + "\n\n"
-
-                prompt += prev_full_plot_context
-                prompt += prev_storyboard_context
-
-                prompt += f"\n\n请只写「{ctx.name}」的分镜内容。全部内容输出完毕后，请在末尾加上结束标记：**【全片完】**"
-
-                if feedback and ctx.index == plan.chunk_count - 1:
-                    prompt += f"\n\n## 修改意见\n{feedback}"
-
-                chunk_output = ""
-                for token in self.call_llm_stream(prompt, "", temperature=0.7):
-                    chunk_output += token
-                    yield token
-
-                _previous_full_plot_texts.append(ctx.outline_section)
+                yield from self.generate_chunk(ctx, template, style_context, visual_style_name,
+                                               screen_aspect_name, "", style, plan, full_plot,
+                                               self._plot_texts, feedback=feedback, variant_table=variant_table)
+                chunk_output = getattr(self, '_last_chunk_output', '')
                 iterator.set_output(ctx.index, chunk_output)
             self._chunks = [{"name": b["name"], "output": b.get("_output", "")} for b in iterator.blocks]
         else:
@@ -164,3 +137,76 @@ class Storyboarder(AgentBase):
                 system_prompt += f"\n\n## 修改意见\n{feedback}"
 
             yield from self.call_llm_stream_with_continuation(system_prompt, "", temperature=0.7)
+
+    def prepare_generation(self, project, style, input_content):
+        template = self.load_prompt_template("storyboarder.txt")
+        full_plot = input_content
+        feedback = ""
+        if "## 修改意见" in input_content:
+            parts = input_content.split("## 修改意见")
+            full_plot = parts[0]
+            feedback = parts[1] if len(parts) > 1 else ""
+        visual_style_name = VISUAL_STYLES.get(style.visual_style, {}).get("name", "未指定")
+        screen_aspect_name = SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "自适应")
+        style_context = self.get_style_context(style)
+        plan = ChunkStrategy.get_plan(style.story_type)
+        iterator = ChunkIter(plan, full_plot)
+        if plan.chunk_count == 0 or not plan.chunk_names:
+            return 0, []
+        self._gen_template = template
+        self._gen_style_context = style_context
+        self._gen_writing_style_name = visual_style_name
+        self._gen_screen_aspect_name = screen_aspect_name
+        self._gen_story_type_name = ""
+        self._gen_plan = plan
+        self._gen_iterator = iterator
+        self._gen_outline = full_plot
+        self._gen_feedback = feedback
+        self._plot_texts = []
+        chunk_count = len(iterator.blocks)
+        chunk_names = [b["name"] for b in iterator.blocks]
+        return chunk_count, chunk_names
+
+    def generate_chunk(self, ctx, template, style_context, writing_style_name,
+                       screen_aspect_name, story_type_name, style, plan, outline,
+                       plot_texts=None, feedback="", variant_table=""):
+        self._last_chunk_output = ""
+        prompt = template.replace("{style_config}", style_context)
+        prompt = prompt.replace("{full_plot}", ctx.outline_section or outline)
+        prompt = prompt.replace("{visual_style}", writing_style_name)
+        prompt = prompt.replace("{screen_aspect}", screen_aspect_name)
+        if "{variant_table}" in prompt:
+            prompt = prompt.replace("{variant_table}", "")
+
+        if plot_texts is None:
+            plot_texts = self._plot_texts if hasattr(self, '_plot_texts') else []
+
+        prev_full_plot_context = ""
+        if plot_texts:
+            prev_full_plot_context = "\n\n## 前序剧本回顾（必须与此衔接，保持人物/事件/场景一致）\n\n"
+            for pp in plot_texts:
+                prev_full_plot_context += f"{pp[-2000:]}\n\n"
+
+        prev_storyboard_context = ""
+        if ctx.previous_full_texts:
+            prev_storyboard_context = "\n\n## 前序分镜回顾（你之前的分镜输出，保持格式和衔接一致性）\n\n"
+            for ft in ctx.previous_full_texts:
+                prev_storyboard_context += ft[-1500:] + "\n\n"
+
+        prompt += prev_full_plot_context
+        prompt += prev_storyboard_context
+
+        prompt += f"\n\n请只写「{ctx.name}」的分镜内容。全部内容输出完毕后，请在末尾加上结束标记：**【全片完】**"
+
+        if feedback and ctx.index == (plan.chunk_count or 1) - 1:
+            prompt += f"\n\n## 修改意见\n{feedback}"
+
+        chunk_output = ""
+        for token in self.call_llm_stream(prompt, "", temperature=0.7):
+            chunk_output += token
+            yield token
+
+        self._last_chunk_output = chunk_output
+        if plot_texts is not None:
+            plot_texts.append(ctx.outline_section)
+        self._plot_texts = plot_texts
