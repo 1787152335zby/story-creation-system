@@ -5,7 +5,9 @@ from core.style_config import StyleConfig, STORY_TYPES, VIDEO_PLATFORMS
 from core.workflow_loader import WorkflowLoader
 from core.cli import console, notify_complete, wait_for_approval, show_progress, select_option, select_version
 from core.back_to_menu import BackToMenu
+from core.agent_factory import create_agent
 from rich.prompt import Prompt
+from pathlib import Path as PPath
 
 
 def _split_sort_key(filename: str) -> int:
@@ -243,11 +245,7 @@ class Orchestrator(AgentBase):
         input_source: str = None,
         extra_kwargs: dict = None,
     ):
-        import importlib
-        module = importlib.import_module(f"agents.{agent_name}")
-        class_name = self._snake_to_pascal(agent_name)
-        agent_class = getattr(module, class_name)
-        agent = agent_class(self.llm)
+        agent = create_agent(agent_name, self.llm)
 
         input_content = ""
         if input_source:

@@ -10,6 +10,7 @@ from agents.orchestrator import _split_sort_key
 from core.content_validator import validate_content
 from core.continuity import extract_continuity, save_continuity, load_last_continuity, generate_continuity_injection
 from core.qc_gates import run_qc_check
+from core.agent_factory import create_agent
 
 from .ws_manager import ConnectionManager
 
@@ -151,12 +152,8 @@ class AsyncOrchestrator:
                     await self._resume_version_selection(project, project_name, idx, style)
                     continue
 
-                import importlib
                 snake_name = phase.agent
-                class_name = "".join(word.capitalize() for word in snake_name.split("_"))
-                module = importlib.import_module(f"agents.{snake_name}")
-                agent_class = getattr(module, class_name)
-                agent = agent_class()
+                agent = create_agent(snake_name)
 
                 input_content = await self._get_input(project, phase)
 
@@ -504,12 +501,8 @@ class AsyncOrchestrator:
                     "type": "progress", "current": idx, "total": total,
                 })
 
-                import importlib
                 snake_name = phase.agent
-                class_name = "".join(word.capitalize() for word in snake_name.split("_"))
-                module = importlib.import_module(f"agents.{snake_name}")
-                agent_class = getattr(module, class_name)
-                agent = agent_class()
+                agent = create_agent(snake_name)
 
                 input_content = await self._get_input(project, phase)
 
@@ -711,12 +704,8 @@ class AsyncOrchestrator:
                 "phase_name": phase.name, "total_phases": len(phases),
             })
 
-            import importlib
             snake_name = phase.agent
-            class_name = "".join(word.capitalize() for word in snake_name.split("_"))
-            module = importlib.import_module(f"agents.{snake_name}")
-            agent_class = getattr(module, class_name)
-            agent = agent_class()
+            agent = create_agent(snake_name)
 
             input_content = await self._get_input(project, phase)
             if phase.agent == "outline_designer":
@@ -1059,12 +1048,8 @@ class AsyncOrchestrator:
             if not phase:
                 project.clear_pending_approval()
                 break
-            import importlib
             snake_name = phase.agent
-            class_name = "".join(word.capitalize() for word in snake_name.split("_"))
-            module = importlib.import_module(f"agents.{snake_name}")
-            agent_class = getattr(module, class_name)
-            agent = agent_class()
+            agent = create_agent(snake_name)
             output_content = project.read_output(self._get_output_path(phase)) or ""
             if phase.agent == "outline_designer":
                 revised_input = "## 用户选择\n请生成版本A的完整大纲。\n\n## 修改意见\n" + feedback
@@ -1119,12 +1104,7 @@ class AsyncOrchestrator:
             fb = version_result.get("feedback", "")
             if fb:
                 revised_input = content + "\n\n## 修改意见\n请混合版本A和版本B：" + fb
-                import importlib
-                snake_name = "outline_designer"
-                class_name = "OutlineDesigner"
-                module = importlib.import_module(f"agents.{snake_name}")
-                agent_class = getattr(module, class_name)
-                agent = agent_class()
+                agent = create_agent("outline_designer")
                 full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, phase_index)
                 full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
                 project.write_output(output_path, full_output)
