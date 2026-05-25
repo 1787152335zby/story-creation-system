@@ -1,0 +1,56 @@
+﻿# ============================================
+# 小说圣经模板 (Novel Bible Template)
+# 用于追踪故事的角色、势力、时间线和伏笔
+# 完整使用说明见项目文档
+# ============================================
+
+# === 角色图谱 ===
+characters:
+  示例角色名:
+    status: 存活          # 存活 / 死亡 / 失踪 / 未知
+    cultivation: 金丹中期  # 修为/能力等级
+    arc: 角色成长弧线简述
+    relations:
+      - 与另一角色(关系类型)    # 关系类型: 信任/敌对/暧昧/利用等
+    last_seen_chapter: 1
+    last_seen_location: 初始地点
+    key_items:
+      - 关键道具/物品
+    pending_hooks:
+      - 待回收的伏笔描述
+
+# === 势力关系 ===
+factions:
+  示例势力:
+    members:
+      - 成员角色名
+    relations:
+      - 与另一势力(关系类型)   # 关系类型: 敌对/联盟/中立等
+    current_goal: 当前目标
+    influence_region: 势力范围
+
+# === 事件时间线 ===
+timeline:
+  - chapter: 1
+    type: 开端
+    summary: 事件简要描述
+  - chapter: 12
+    type: 转折
+    summary: 重大转折事件描述
+
+# === 伏笔管理 ===
+hooks:
+  - description: 伏笔描述
+    planted_at: 埋下章节
+    status: 未收            # 未收 / 已收 / 转化
+    expected_resolve: 预计回收章节
+
+# === 世界观规则 ===
+world_rules:
+  - 世界观核心规则1
+  - 世界观核心规则2
+
+# === 章节摘要 ===
+chapter_summaries:
+  1: 第一章内容概要
+  2: 第二章内容概要

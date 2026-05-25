@@ -26,21 +26,26 @@ class OpenAIBackend(LLMBackend):
         from openai import OpenAI
         return OpenAI(
             api_key=self._api_key or os.getenv("OPENAI_API_KEY"),
-            base_url=self._base_url or None,
+            base_url=self._base_url or os.getenv("OPENAI_BASE_URL") or None,
             timeout=120,
         )
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
-        response = self._get_client().chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+        try:
+            response = self._get_client().chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if isinstance(response, str):
+                raise RuntimeError(f"API 返回异常: {response[:200]}")
+            return response.choices[0].message.content
+        except Exception as e:
+            raise RuntimeError(f"OpenAI/DeepSeek 调用失败: {e}")
 
     def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
         response = self._get_client().chat.completions.create(
@@ -70,14 +75,17 @@ class ClaudeBackend(LLMBackend):
         return Anthropic(**kwargs)
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
-        response = self._get_client().messages.create(
-            model=self.model,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.content[0].text
+        try:
+            response = self._get_client().messages.create(
+                model=self.model,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.content[0].text
+        except Exception as e:
+            raise RuntimeError(f"Claude 调用失败: {e}")
 
     def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
         with self._get_client().messages.stream(
@@ -104,16 +112,21 @@ class DeepSeekBackend(LLMBackend):
         )
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
-        response = self._get_client().chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+        try:
+            response = self._get_client().chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if isinstance(response, str):
+                raise RuntimeError(f"API 返回异常: {response[:200]}")
+            return response.choices[0].message.content
+        except Exception as e:
+            raise RuntimeError(f"DeepSeek 调用失败: {e}")
 
     def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
         response = self._get_client().chat.completions.create(

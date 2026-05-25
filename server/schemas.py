@@ -17,6 +17,7 @@ class StyleConfigRequest(BaseModel):
     custom_requirements: str = ""
     visual_reference: str = ""
     action_reference: str = ""
+    mood: str = ""
 
 
 class CreateProjectRequest(BaseModel):
@@ -24,6 +25,8 @@ class CreateProjectRequest(BaseModel):
     story_idea: str
     style: StyleConfigRequest
     duration_line: str = ""
+    model: str = ""
+    template_name: str = ""
 
 
 class ProjectListItem(BaseModel):

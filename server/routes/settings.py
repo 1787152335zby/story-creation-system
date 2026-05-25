@@ -217,6 +217,14 @@ def get_available_models():
     
     # 收集各类型的配置：优先用激活的，没有激活的就用全部
     agg_configs = _read_agg_configs()
+
+    # Determine which LLM source is actually active (used later)
+    active_llm = None
+    for c in agg_configs:
+        if c.get("type") == "llm" and c.get("active"):
+            active_llm = c
+            break
+
     configs_by_type: dict[str, list[dict]] = {}
     for c in agg_configs:
         ct = c.get("type", "llm")
@@ -284,7 +292,7 @@ def get_available_models():
                 for owner, model_ids in sorted(merged.items()):
                     label = OWNER_LABELS.get(owner, owner.capitalize())
                     models_list = [{"value": mid, "label": mid} for mid in sorted(model_ids)]
-                    llm_models = [m for m in models_list if categorize_model(m["value"]) == "llm"]
+                    llm_models = [m for m in models_list if categorize_model(m["value"]) == "llm" and "/" not in m["value"]]
                     image_models = [m for m in models_list if categorize_model(m["value"]) == "image"]
                     video_models = [m for m in models_list if categorize_model(m["value"]) == "video"]
                     if llm_models:
@@ -305,22 +313,68 @@ def get_available_models():
     for hc_type in ("llm_groups", "image_groups", "video_groups"):
         hc = hardcoded.get(hc_type, [])
         lv = live_groups.get(hc_type.replace("_groups", ""), [])
-        # 始终优先用 live 数据；live 为空时用硬编码兜底
-        result_groups = list(lv) if lv else list(hc)
-        # 按名称合并：live 已有的分组，补充硬编码中同名分组缺失的模型
-        if lv:
-            name_to_group = {g.get("name"): g for g in result_groups}
-            for g in hc:
-                hname = g.get("name")
-                if hname and hname in name_to_group:
-                    existing = name_to_group[hname]
-                    existing_vals = {m["value"] for m in existing["models"]}
-                    for m in g.get("models", []):
-                        if m["value"] not in existing_vals:
-                            existing_vals.add(m["value"])
-                            existing["models"].append(m)
-                else:
-                    result_groups.append(g)
+
+        # 如果没有活跃的 LLM 聚合配置，尝试从官方 API 拉取实时模型列表（如 DeepSeek 的 /v1/models）
+        if hc_type == "llm_groups" and not active_llm:
+            official_live = []
+            llm_backend = env.get("LLM_BACKEND", "openai").lower()
+            # 映射后端到 API key 和 base_url
+            key_var = f"{llm_backend.upper()}_API_KEY"
+            api_key = env.get(key_var, "")
+            base_urls = {
+                "deepseek": "https://api.deepseek.com",
+                "openai": "https://api.openai.com",
+                "claude": "",
+            }
+            base = base_urls.get(llm_backend, "")
+            if api_key and api_key != "your-key-here" and "****" not in api_key and base:
+                try:
+                    models_url = base + "/models" if "/v1" in base else base + "/v1/models"
+                    resp = requests.get(models_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        items = data.get("data", data) if isinstance(data, dict) else data
+                        if isinstance(items, list):
+                            mids = [m["id"] for m in items if isinstance(m, dict) and m.get("id")]
+                            # 只保留 type==llm 的模型（排除 image/video）
+                            mids = [m for m in mids if categorize_model(m) == "llm"]
+                            # 排除第三方代理模型（如 siliconflow/ 前缀）
+                            mids = [m for m in mids if "/" not in m]
+                            # 外加硬编码中当前后端的模型列表兜底
+                            hc_mids = []
+                            for g in hc:
+                                gid = g.get("id", "").lower()
+                                if gid == llm_backend or llm_backend in g.get("name", "").lower():
+                                    for m in g.get("models", []):
+                                        if m["value"] not in mids:
+                                            hc_mids.append(m["value"])
+                            all_mids = list(dict.fromkeys(mids + hc_mids))
+                            owner_label = {"deepseek": "DeepSeek", "openai": "OpenAI", "claude": "Claude"}
+                            official_live = [{
+                                "id": llm_backend,
+                                "name": owner_label.get(llm_backend, llm_backend.capitalize()),
+                                "models": [{"value": m, "label": m} for m in all_mids],
+                                "configured": True,
+                            }]
+                except Exception:
+                    pass
+            result_groups = list(official_live) if official_live else list(hc)
+        else:
+            result_groups = list(lv) if lv else list(hc)
+            # 按名称合并：live 已有的分组，补充硬编码中同名分组缺失的模型
+            if lv:
+                name_to_group = {g.get("name"): g for g in result_groups}
+                for g in hc:
+                    hname = g.get("name")
+                    if hname and hname in name_to_group:
+                        existing = name_to_group[hname]
+                        existing_vals = {m["value"] for m in existing["models"]}
+                        for m in g.get("models", []):
+                            if m["value"] not in existing_vals:
+                                existing_vals.add(m["value"])
+                                existing["models"].append(m)
+                    else:
+                        result_groups.append(g)
         result[hc_type] = result_groups
 
     # 合并同名组（按 id）+ 去重
@@ -346,6 +400,20 @@ def get_available_models():
         "has_key": agg_has_key,
         "base_url": agg_base,
     }
+
+    # Determine which LLM source is actually active
+    if active_llm:
+        result["active_llm_source"] = {
+            "type": "aggregated",
+            "name": active_llm.get("name", ""),
+            "base_url": active_llm.get("base_url", ""),
+        }
+    else:
+        llm_backend = env.get("LLM_BACKEND", "openai").lower()
+        result["active_llm_source"] = {
+            "type": "official",
+            "backend": llm_backend,
+        }
     return result
 
 

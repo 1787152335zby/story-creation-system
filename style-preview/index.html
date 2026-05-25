@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>织境</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
+canvas{position:fixed;inset:0;display:block;pointer-events:none}
+
+.gate-ui{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.gate-ui .title{font-size:clamp(48px,12vw,120px);font-weight:900;letter-spacing:-0.06em;background:linear-gradient(135deg,#fff 20%,rgba(180,200,255,0.85) 50%,rgba(167,139,250,0.5) 80%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 80px rgba(129,140,248,0.15))}
+.gate-ui .sub{font-size:clamp(11px,1.5vw,14px);color:rgba(255,255,255,0.15);letter-spacing:0.25em;margin-top:16px}
+.btn-enter{position:fixed;bottom:30%;left:50%;transform:translateX(-50%);z-index:20;pointer-events:auto;padding:12px 48px;border-radius:14px;border:1px solid rgba(255,255,255,0.08);background:transparent;color:rgba(255,255,255,0.25);font-size:13px;font-family:inherit;font-weight:500;cursor:pointer;transition:all 0.3s}
+.btn-enter:hover{color:rgba(255,255,255,0.6);border-color:rgba(255,255,255,0.15)}
+
+.home-ui{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;flex-direction:column;opacity:0;transition:opacity 1.2s}
+.home-ui.show{opacity:1}
+.h-top{pointer-events:auto;display:flex;justify-content:space-between;align-items:center;padding:18px 28px;background:rgba(0,0,0,0.3);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,0.03)}
+.h-top .brand{font-size:16px;font-weight:700;background:linear-gradient(135deg,rgba(255,255,255,0.9),rgba(180,200,255,0.7));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.h-top nav{display:flex;gap:4px}
+.h-top nav button{padding:6px 14px;border-radius:8px;border:none;background:transparent;color:rgba(255,255,255,0.18);font-size:11px;font-family:inherit;cursor:pointer;transition:all 0.2s}
+.h-top nav button:hover{background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.5)}
+.h-scroll{flex:1;pointer-events:auto;overflow-y:auto;padding:50px 28px 80px}
+.h-scroll::-webkit-scrollbar{width:3px}
+.h-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:2px}
+.h-inner{max-width:800px;margin:0 auto;position:relative}
+
+/* Energy line flow from hero */
+.energy-bar{width:100%;height:1px;max-width:500px;margin:0 auto 36px;position:relative;background:linear-gradient(90deg,transparent,rgba(129,140,248,0.3),rgba(167,139,250,0.5),rgba(129,140,248,0.3),transparent);opacity:0;transition:all 0.8s}
+.energy-bar.show{opacity:1}
+.energy-bar::before{content:'';position:absolute;top:-1px;left:-20%;width:40%;height:3px;background:linear-gradient(90deg,transparent,rgba(200,210,255,0.7),rgba(180,200,255,0.4),transparent);filter:blur(2px);animation:flow 2s linear infinite}
+@keyframes flow{0%{left:-40%}100%{left:100%}}
+
+.h-hero{text-align:center;margin-bottom:12px;opacity:0;transform:translateY(20px);transition:all 0.8s}
+.h-hero.show{opacity:1;transform:translateY(0)}
+.h-hero h2{font-size:clamp(28px,5vw,48px);font-weight:900;letter-spacing:-0.03em;background:linear-gradient(180deg,rgba(255,255,255,0.98) 20%,rgba(180,200,255,0.6));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(129,140,248,0.08))}
+.h-hero p{font-size:12px;color:rgba(255,255,255,0.12);margin-top:8px;letter-spacing:0.2em}
+
+.h-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:40px;perspective:1200px}
+.h-card{padding:28px 20px;border-radius:18px;border:1px solid rgba(255,255,255,0.08);cursor:pointer;background:rgba(255,255,255,0.07);backdrop-filter:blur(24px);transition:all 0.4s cubic-bezier(0.23,1,0.32,1);opacity:0;transform:translateY(20px);position:relative;overflow:hidden;box-shadow:0 0 0 0 transparent}
+.h-card.show{opacity:1;transform:translateY(0)}
+/* Star dots on card surface */
+.h-card .stars{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:inherit}
+.h-card .stars .sd{position:absolute;width:2px;height:2px;border-radius:50%;background:rgba(255,255,255,0.8);animation:twinkle var(--d,2s) ease-in-out infinite;opacity:0}
+.h-card .stars .sd:nth-child(1){top:15%;left:20%;--d:2.2s}
+.h-card .stars .sd:nth-child(2){top:35%;left:75%;--d:3s}
+.h-card .stars .sd:nth-child(3){top:55%;left:10%;--d:1.8s}
+.h-card .stars .sd:nth-child(4){top:70%;left:85%;--d:2.8s}
+.h-card .stars .sd:nth-child(5){top:88%;left:40%;--d:2.4s}
+.h-card .stars .sd:nth-child(6){top:10%;left:55%;--d:3.2s}
+.h-card .stars .sd:nth-child(7){top:45%;left:45%;--d:1.5s}
+.h-card .stars .sd:nth-child(8){top:80%;left:65%;--d:2.6s}
+@keyframes twinkle{0%,100%{opacity:0;transform:scale(0.5)}50%{opacity:1;transform:scale(1.3)}}
+/* Starburst cross on hover */
+.h-card .star-burst{position:absolute;top:50%;left:50%;width:0;height:0;pointer-events:none;opacity:0;transition:opacity 0.5s}
+.h-card:hover .star-burst{opacity:1}
+.h-card .star-burst::before,.h-card .star-burst::after{content:'';position:absolute;background:rgba(180,200,255,0.12);border-radius:50%}
+.h-card .star-burst::before{width:120px;height:2px;transform:translate(-50%,-50%);box-shadow:0 0 20px rgba(180,200,255,0.08)}
+.h-card .star-burst::after{width:2px;height:120px;transform:translate(-50%,-50%);box-shadow:0 0 20px rgba(180,200,255,0.08)}
+/* Bottom glow reflection */
+.h-card::before{content:'';position:absolute;bottom:0;left:10%;width:80%;height:40%;border-radius:50%;background:linear-gradient(180deg,rgba(129,140,248,0.12),transparent);filter:blur(20px);opacity:0;transition:opacity 0.5s;pointer-events:none}
+.h-card:hover::before{opacity:1}
+/* Top light sweep */
+.h-card .sweep{position:absolute;top:0;left:-100%;width:60%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent);transform:skewX(-20deg);transition:left 0.8s;pointer-events:none}
+.h-card:hover .sweep{left:150%}
+.h-card:hover{border-color:rgba(255,255,255,0.15);transform:translateY(-4px) scale(1.02);background:rgba(255,255,255,0.1);box-shadow:0 16px 48px rgba(99,102,241,0.1),0 0 0 1px rgba(129,140,248,0.06)}
+/* Star icon — now a glowing star core */
+.h-card .icon{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:15px;margin-bottom:16px;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.55);transition:all 0.3s;border:1px solid rgba(255,255,255,0.04);position:relative;overflow:hidden}
+.h-card .icon .ic{position:relative;z-index:1}
+.h-card .icon::before{content:'';position:absolute;inset:-4px;border-radius:inherit;background:radial-gradient(circle,rgba(180,200,255,0.15),transparent 70%);opacity:0;transition:opacity 0.4s;filter:blur(4px)}
+.h-card:hover .icon::before{opacity:1}
+.h-card .icon::after{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(135deg,rgba(180,200,255,0.12),transparent 60%);opacity:0;transition:opacity 0.4s}
+.h-card:hover .icon::after{opacity:1}
+.h-card:hover .icon{background:rgba(129,140,248,0.15);color:rgba(200,210,255,0.9);border-color:rgba(129,140,248,0.15);box-shadow:0 0 30px rgba(129,140,248,0.12)}
+.h-card .label{font-size:14px;font-weight:600;color:rgba(255,255,255,0.8);margin-bottom:5px;transition:color 0.3s}
+.h-card:hover .label{color:rgba(255,255,255,1)}
+.h-card .desc{font-size:11px;color:rgba(255,255,255,0.3);line-height:1.5}
+
+/* Static subtle border glow (always on) */
+.h-card::after{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:conic-gradient(from var(--ba,0deg),transparent 65%,rgba(180,200,255,0.04),rgba(160,180,255,0.08),transparent 75%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:br 8s linear infinite;pointer-events:none;transition:opacity 0.4s}
+.h-card:hover::after{background:conic-gradient(from var(--ba,0deg),transparent 60%,rgba(180,200,255,0.12),rgba(160,180,255,0.2),rgba(180,200,255,0.12),transparent 70%);animation-duration:4s}
+@property --ba{syntax:'<angle>';initial-value:0deg;inherits:false}
+@keyframes br{to{--ba:360deg}}
+
+.h-section{font-size:10px;color:rgba(255,255,255,0.25);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px;opacity:0;transition:all 0.6s 0.3s}
+.h-section.show{opacity:1}
+.h-row{display:flex;align-items:center;gap:16px;padding:16px 20px;border-radius:14px;border:1px solid rgba(255,255,255,0.04);margin-bottom:6px;cursor:pointer;background:rgba(255,255,255,0.03);backdrop-filter:blur(16px);transition:all 0.3s;opacity:0;transform:translateX(-10px);position:relative;overflow:hidden}
+.h-row.show{opacity:1;transform:translateX(0)}
+.h-row::before{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,rgba(129,140,248,0.05),transparent);opacity:0;transition:opacity 0.4s}
+.h-row:hover::before{opacity:1}
+.h-row:hover{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.1);transform:translateX(4px);box-shadow:0 0 40px rgba(99,102,241,0.06)}
+.h-row .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;position:relative}
+.h-row .name{flex:1;font-size:13px;font-weight:500;color:rgba(255,255,255,0.65);transition:color 0.2s}
+.h-row:hover .name{color:rgba(255,255,255,0.9)}
+.h-row .meta{font-size:11px;color:rgba(255,255,255,0.25)}
+@media(max-width:768px){.h-cards{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="bgFx" style="position:fixed;inset:0;z-index:5;pointer-events:none;display:none"></canvas>
+
+<div class="gate-ui" id="gateUI">
+  <div class="title">织境</div>
+  <div class="sub">AI STORY STUDIO</div>
+</div>
+<button class="btn-enter" id="btnEnter" onclick="enterHome()">进入</button>
+
+<div class="home-ui" id="homeUI">
+  <div class="h-top">
+    <span class="brand">织境</span>
+    <nav><button>新建</button><button>生图</button><button>视频</button><button>历史</button></nav>
+  </div>
+  <div class="h-scroll">
+    <div class="h-inner">
+      <div class="h-hero" id="hero"><h2>从灵感到银幕</h2><p>AI-Powered Story Creation</p></div>
+      <div class="energy-bar" id="eBar"></div>
+      <div class="h-cards" id="cards">
+        <div class="h-card" style="transition-delay:0.1s">
+          <div class="stars"><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div></div>
+          <div class="star-burst"></div><div class="sweep"></div><div class="icon"><span class="ic">✦</span></div><div class="label">开始创作</div><div class="desc">从一句话想法开始</div>
+        </div>
+        <div class="h-card" style="transition-delay:0.2s">
+          <div class="stars"><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div></div>
+          <div class="star-burst"></div><div class="sweep"></div><div class="icon"><span class="ic">◈</span></div><div class="label">智能生图</div><div class="desc">角色·场景·道具</div>
+        </div>
+        <div class="h-card" style="transition-delay:0.3s">
+          <div class="stars"><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div></div>
+          <div class="star-burst"></div><div class="sweep"></div><div class="icon"><span class="ic">◉</span></div><div class="label">视频生成</div><div class="desc">图生视频·拼接</div>
+        </div>
+        <div class="h-card" style="transition-delay:0.4s">
+          <div class="stars"><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div><div class="sd"></div></div>
+          <div class="star-burst"></div><div class="sweep"></div><div class="icon"><span class="ic">⬡</span></div><div class="label">创作历史</div><div class="desc">已生成内容</div>
+        </div>
+      </div>
+      <div class="h-section" id="section">项目列表</div>
+      <div class="h-row" style="transition-delay:0.2s"><div class="dot" style="background:rgba(129,140,248,0.5)"></div><span class="name">记忆实验室</span><span class="meta">科幻 · 05-24 · 3/4</span></div>
+      <div class="h-row" style="transition-delay:0.3s"><div class="dot" style="background:rgba(52,211,153,0.5)"></div><span class="name">暗室</span><span class="meta">悬疑 · 已完成</span></div>
+      <div class="h-row" style="transition-delay:0.4s"><div class="dot" style="background:rgba(251,191,36,0.5)"></div><span class="name">星海之下</span><span class="meta">冒险 · 待审核</span></div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js">
+
+<script type="module">
+import * as THREE from 'three'
+
+const c=document.getElementById('c')
+const r=new THREE.WebGLRenderer({canvas:c,antialias:true})
+r.setPixelRatio(Math.min(devicePixelRatio,2))
+r.setClearColor(0x000000,1)
+
+const s=new THREE.Scene()
+const cam=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,500)
+cam.position.z=6
+
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight)})
+r.setSize(innerWidth,innerHeight)
+
+// Grid
+const grid=new THREE.PolarGridHelper(8,32,20,64,0x111111,0x111111)
+grid.position.z=-3;s.add(grid)
+
+// Big ring
+const ring1=new THREE.Mesh(new THREE.TorusGeometry(3,0.002,16,120),new THREE.MeshBasicMaterial({color:0x222233}))
+ring1.rotation.x=Math.PI*0.45;ring1.position.z=-0.5;s.add(ring1)
+
+// Small rings
+for(let i=0;i<3;i++){
+  const rr=new THREE.Mesh(new THREE.TorusGeometry(1.2+i*0.9,0.001,8,80),new THREE.MeshBasicMaterial({color:0x111122}))
+  rr.rotation.x=Math.random()*Math.PI;rr.rotation.y=Math.random()*Math.PI;s.add(rr)
+}
+
+// Core glow
+s.add(new THREE.Mesh(new THREE.SphereGeometry(0.15,32,32),new THREE.MeshBasicMaterial({color:0x334466})))
+const go=new THREE.Mesh(new THREE.SphereGeometry(0.35,32,32),new THREE.MeshBasicMaterial({color:0x111133,transparent:true,opacity:0.4}))
+s.add(go)
+
+// Particles
+const N=400,geo=new THREE.BufferGeometry(),pos=new Float32Array(N*3),col=new Float32Array(N*3),base=new Float32Array(N*3)
+for(let i=0;i<N;i++){
+  const i3=i*3,theta=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1),rad=1.8+Math.random()*3.5
+  const x=Math.sin(phi)*Math.cos(theta)*rad,y=Math.sin(phi)*Math.sin(theta)*rad+0.5,z=Math.cos(phi)*rad
+  base[i3]=pos[i3]=x;base[i3+1]=pos[i3+1]=y;base[i3+2]=pos[i3+2]=z
+  const cl=new THREE.Color().setHSL(0.65+Math.random()*0.1,0.5,0.5+Math.random()*0.3)
+  col[i3]=cl.r;col[i3+1]=cl.g;col[i3+2]=cl.b
+}
+geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setAttribute('color',new THREE.BufferAttribute(col,3))
+const pm=new THREE.PointsMaterial({size:0.03,vertexColors:true,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:0.8})
+const ps=new THREE.Points(geo,pm);s.add(ps)
+
+// Background stars
+const sg=new THREE.BufferGeometry(),sp=new Float32Array(500*3),sc2=new Float32Array(500*3)
+for(let i=0;i<500;i++){
+  const i3=i*3;sp[i3]=(Math.random()-.5)*100;sp[i3+1]=(Math.random()-.5)*60;sp[i3+2]=-10-Math.random()*50
+  const c3=new THREE.Color().setHSL(0.62,0.3,0.12+Math.random()*0.18);sc2[i3]=c3.r;sc2[i3+1]=c3.g;sc2[i3+2]=c3.b
+}
+sg.setAttribute('position',new THREE.BufferAttribute(sp,3));sg.setAttribute('color',new THREE.BufferAttribute(sc2,3))
+const starsMat=new THREE.PointsMaterial({size:0.025,vertexColors:true,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:0})
+s.add(new THREE.Points(sg,starsMat))
+
+// Fade in everything smoothly on load
+let fadeInProgress=0,exploded=false,ep=-1
+// Camera animation
+let camTargetZ=6,settled=false
+const vel=new Float32Array(N*3),clock=new THREE.Clock(),pa=geo.attributes.position.array
+pm.opacity=0
+
+// Second particle layer for settled drift
+const driftN=400
+const driftGeo=new THREE.BufferGeometry(),driftPos=new Float32Array(driftN*3)
+const driftVel=new Float32Array(driftN*3)
+for(let i=0;i<driftN;i++){
+  const i3=i*3;driftPos[i3]=(Math.random()-.5)*80;driftPos[i3+1]=(Math.random()-.5)*50;driftPos[i3+2]=(Math.random()-.5)*40
+  driftVel[i3]=(Math.random()-.5)*0.05;driftVel[i3+1]=(Math.random()-.5)*0.05;driftVel[i3+2]=(Math.random()-.5)*0.03
+}
+driftGeo.setAttribute('position',new THREE.BufferAttribute(driftPos,3))
+const driftMat=new THREE.PointsMaterial({size:0.055,color:0x88aadd,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:0})
+const driftPs=new THREE.Points(driftGeo,driftMat)
+s.add(driftPs)
+
+window.enterHome=()=>{
+  if(exploded)return;exploded=true
+  document.getElementById('gateUI').style.display='none'
+  document.getElementById('btnEnter').style.display='none'
+  camTargetZ=12
+  for(let i=0;i<N;i++){
+    const i3=i*3,x=base[i3],y=base[i3+1],z=base[i3+2],len=Math.sqrt(x*x+y*y+z*z)||1
+    vel[i3]=(x/len)*(1.5+Math.random()*4)+(Math.random()-.5)*2
+    vel[i3+1]=(y/len)*(1.5+Math.random()*4)+(Math.random()-.5)*2
+    vel[i3+2]=(z/len)*(1.5+Math.random()*4)+(Math.random()-.5)*2
+  }
+  // Background canvas 2D particles
+  setTimeout(()=>{
+    driftMat.opacity=0.85
+    r.setClearColor(new THREE.Color(0x050510),1)
+    // Start 2D particle layer
+    const bgC=document.getElementById('bgFx'),bgCtx=bgC.getContext('2d')
+    bgC.style.display='block'
+    bgC.width=innerWidth;bgC.height=innerHeight
+    const bp=[]
+    for(let i=0;i<250;i++)bp.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*2.5+0.8,o:Math.random()*0.4+0.1,v:(Math.random()-.5)*0.25,ph:Math.random()*Math.PI*2,h:200+Math.random()*50})
+    let bfId=0
+    const bf=(t)=>{
+      bgC.width=innerWidth;bgC.height=innerHeight
+      bp.forEach(p=>{
+        p.y+=p.v;p.x+=Math.sin(t*0.001+p.ph)*0.15
+        if(p.y<-10)p.y=innerHeight+10;if(p.y>innerHeight+10)p.y=-10
+        const a=p.o*(0.5+0.5*Math.sin(t*0.002+p.ph))
+        bgCtx.beginPath();bgCtx.arc(p.x,p.y,p.r,0,Math.PI*2)
+        bgCtx.fillStyle=`hsla(${p.h},60%,78%,${a})`;bgCtx.fill()
+      })
+      bfId=requestAnimationFrame(bf)
+    }
+    bf(0)
+  },1200)
+  setTimeout(()=>{
+    settled=true
+    document.getElementById('homeUI').classList.add('show')
+    // Stagger animations
+    setTimeout(()=>document.getElementById('hero').classList.add('show'),100)
+    setTimeout(()=>document.getElementById('eBar').classList.add('show'),200)
+    document.querySelectorAll('.h-card').forEach((card,i)=>setTimeout(()=>card.classList.add('show'),300+i*100))
+    document.getElementById('section').classList.add('show')
+    document.querySelectorAll('.h-row').forEach((row,i)=>setTimeout(()=>row.classList.add('show'),500+i*120))
+  },1800)
+}
+
+function anim(){
+  const t=clock.getElapsedTime()
+
+  // Smooth load: particles & stars fade in from 0
+  if(fadeInProgress<1){
+    fadeInProgress=Math.min(1,fadeInProgress+0.006)
+    pm.opacity=0.8*fadeInProgress
+    starsMat.opacity=fadeInProgress
+  }
+
+  // Camera smooth pull-back
+  cam.position.z+=(camTargetZ-cam.position.z)*0.01
+
+  // Grid moves with camera
+  grid.position.z=-3-(camTargetZ-6)*0.5
+
+  // Background ambient glow for home
+  if(settled){
+    const pulse=0.7+0.3*Math.sin(t*0.3)
+    go.material.color.setHSL(0.68,0.4,0.12*pulse)
+    ring1.material.color.setHSL(0.65,0.2,0.15)
+    // Animate drift particles
+    driftPs.rotation.y+=0.0002;driftPs.rotation.x+=0.00008
+    const dp=driftGeo.attributes.position.array
+    for(let i=0;i<driftN;i++){const i3=i*3;dp[i3]+=driftVel[i3];dp[i3+1]+=driftVel[i3+1];dp[i3+2]+=driftVel[i3+2]}
+    driftGeo.attributes.position.needsUpdate=true
+  }
+
+  if(exploded){
+    ep=ep<0?0:ep+0.016/2.5
+    if(ep<1){
+      for(let i=0;i<N;i++){const i3=i*3;pa[i3]+=vel[i3]*0.016;pa[i3+1]+=vel[i3+1]*0.016;pa[i3+2]+=vel[i3+2]*0.016}
+      geo.attributes.position.needsUpdate=true
+      pm.opacity=ep<0.6?0.9:0.9*(1-(ep-0.6)/0.2)
+    }
+    // After explosion peak, keep particles at low opacity as background
+    if(ep>=0.6){
+      pm.opacity=0.4;pm.size=0.045
+      // Slow drift
+      for(let i=0;i<N;i++){const i3=i*3;pa[i3]+=(Math.random()-.5)*0.004;pa[i3+1]+=(Math.random()-.5)*0.004;pa[i3+2]+=(Math.random()-.5)*0.003}
+      geo.attributes.position.needsUpdate=true
+    }
+  }else{
+    ps.rotation.y+=0.001;ps.rotation.x+=0.0003
+    ring1.rotation.z+=0.0005
+    go.scale.setScalar(1+Math.sin(t*2)*0.2)
+  }
+  r.render(s,cam);requestAnimationFrame(anim)
+}
+anim()
+</script>
+</body>
+</html>

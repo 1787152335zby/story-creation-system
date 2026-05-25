@@ -30,6 +30,7 @@ class OpenAICompatBackend(ImageBackend):
         return self._name
 
 
+# 注意：以下类在当前调用链路中未被使用，保留仅供兼容参考
 class GPTImageBackend(ImageBackend):
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY", "")
@@ -49,6 +50,7 @@ class GPTImageBackend(ImageBackend):
         return "GPT-Image-1"
 
 
+# 注意：此类在当前调用链路中未被使用，保留仅供兼容参考
 class Banana2Backend(ImageBackend):
     def __init__(self):
         self.api_key = os.getenv("BANANA2_API_KEY", "")
@@ -68,6 +70,7 @@ class Banana2Backend(ImageBackend):
         return "Nano Banana 2"
 
 
+# 注意：此类在当前调用链路中未被使用，保留仅供兼容参考
 class CustomImageBackend(ImageBackend):
     def __init__(self):
         self.api_key = os.getenv("CUSTOM_IMAGE_API_KEY", "")

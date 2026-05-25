@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Sparkles, Loader2, Download, Trash2 } from 'lucide-react'
-import { fetchProjects, fetchCharacters, fetchScenes, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion } from '../lib/api'
+import { fetchProjects, fetchCharacters, fetchScenes, fetchProps, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, fetchGenerationHistoryItem, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion, uploadReferenceImage, generateSelectionPrompt, fetchConfirmedImages, fetchImagePresets, fetchCharacterPrompt, fetchCharacterConfirmedImages, fetchScenePrompt, fetchSceneConfirmedImages, fetchPropPrompt } from '../lib/api'
 import FreeImageGenForm from '../components/FreeImageGenForm'
 import ProjectImageGenForm from '../components/ProjectImageGenForm'
 import ImagePreview from '../components/ImagePreview'
 
 import { useToast } from '../components/Toast'
-import type { ProjectInfo, EntityImagesMap, GenerationHistory } from '../lib/types'
+import Starfield from '../components/Starfield'
+import type { ProjectInfo, EntityImagesMap, GenerationHistory, HistoryEntry, CharacterInfo, SceneInfo, PropInfo, EntityImage, ReferenceUrlsByType } from '../lib/types'
 
 export default function ImageGenPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { toast } = useToast()
   const [mode, setMode] = useState<'free' | 'project'>('free')
 
@@ -21,119 +23,256 @@ export default function ImageGenPage() {
   const [freeCount, setFreeCount] = useState(1)
   const [freeGenerating, setFreeGenerating] = useState(false)
   const [freeResults, setFreeResults] = useState<{ url: string; local: string }[]>([])
-  const [resolutions, setResolutions] = useState<string[]>([])
-  const [ratioGroups, setRatioGroups] = useState<Record<string, string[]>>({})
-  const [selectedRatio, setSelectedRatio] = useState('')
+  // Free mode resolutions
+  const [freeResolutions, setFreeResolutions] = useState<string[]>([])
+  const [freeRatioGroups, setFreeRatioGroups] = useState<Record<string, string[]>>({})
+  const [freeSelectedRatio, setFreeSelectedRatio] = useState('')
   const [freeModel, setFreeModel] = useState('')
+  const [presets, setPresets] = useState<any[]>([])
+  const [selectedPreset, setSelectedPreset] = useState<any | null>(null)
+  const [projSelectedPreset, setProjSelectedPreset] = useState<any | null>(null)
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  // Project mode resolutions
+  const [projResolutions, setProjResolutions] = useState<string[]>([])
+  const [projRatioGroups, setProjRatioGroups] = useState<Record<string, string[]>>({})
+  const [projSelectedRatio, setProjSelectedRatio] = useState('')
   const [projectModel, setProjectModel] = useState('')
 
   // Project mode
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [selectedProject, setSelectedProject] = useState<string>('')
-  const [characters, setCharacters] = useState<any[]>([])
-  const [scenes, setScenes] = useState<any[]>([])
+  const [characters, setCharacters] = useState<CharacterInfo[]>([])
+  const [scenes, setScenes] = useState<SceneInfo[]>([])
+  const [props, setProps] = useState<PropInfo[]>([])
+  const [extracting, setExtracting] = useState(false)
+  const [extractLog, setExtractLog] = useState('')
   const [loading, setLoading] = useState(false)
-  const [generatedImages, setGeneratedImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
+  const [generatedImages, setGeneratedImages] = useState<EntityImagesMap>({ characters: {}, scenes: {}, props: {} })
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
 
-  const [selectedCharNames, setSelectedCharNames] = useState<string[]>([])
-  const [selectedSceneNames, setSelectedSceneNames] = useState<string[]>([])
+  const [selectedChar, setSelectedChar] = useState<string | null>(null)
+  const [selectedScene, setSelectedScene] = useState<string | null>(null)
+  const [autoRefUrls, setAutoRefUrls] = useState<string[]>([])
+  const [manualRefUrls, setManualRefUrls] = useState<string[]>([])
   const [projectPrompt, setProjectPrompt] = useState('')
   const [projectNegative, setProjectNegative] = useState('')
   const [projectSize, setProjectSize] = useState('')
   const [projectCount, setProjectCount] = useState(1)
   const [projectGenerating, setProjectGenerating] = useState(false)
-  const [projectResults, setProjectResults] = useState<{ url: string; local: string }[]>([])
+  const [projectResults, setProjectResults] = useState<{ url: string; local: string; seed?: number }[]>([])
+  const [lastSeed, setLastSeed] = useState<number | null>(null)
   const [useCharTemplate, setUseCharTemplate] = useState(false)
   const [useSceneTemplate, setUseSceneTemplate] = useState(false)
   const [freeError, setFreeError] = useState('')
   const [projectError, setProjectError] = useState('')
-  const [historyFree, setHistoryFree] = useState<{ name: string; url: string }[]>([])
-  const [historyProject, setHistoryProject] = useState<{ name: string; url: string }[]>([])
+  const [freeRefUrls, setFreeRefUrls] = useState<string[]>([])
+  const [freeRefUrlsByType, setFreeRefUrlsByType] = useState<ReferenceUrlsByType>({ style: [], character: [], scene: [], prop: [] })
+  const [historyFree, setHistoryFree] = useState<HistoryEntry[]>([])
+  const [historyProject, setHistoryProject] = useState<HistoryEntry[]>([])
   const [showAllFree, setShowAllFree] = useState(false)
   const [showAllProject, setShowAllProject] = useState(false)
   const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({})
   const [confirmDelete, setConfirmDelete] = useState<{ message: string; action: () => void } | null>(null)
+  const [autoRefUrlsByType, setAutoRefUrlsByType] = useState<ReferenceUrlsByType>({ style: [], character: [], scene: [], prop: [] })
+  const [manualRefUrlsByType, setManualRefUrlsByType] = useState<ReferenceUrlsByType>({ style: [], character: [], scene: [], prop: [] })
+  const [selectedProp, setSelectedProp] = useState<string | null>(null)
+  const [promptLocked, setPromptLocked] = useState(false)
+  const [refTypeEnabled, setRefTypeEnabled] = useState<Record<string, boolean>>({ style: true, character: true, scene: true, prop: true })
 
   useEffect(() => {
     fetchProjects().then(setProjects)
-    fetchGenerationHistory().then(h => { setHistoryFree(h.images_free); setHistoryProject(h.images_project) })
+    fetchImagePresets().then(setPresets)
+    fetchGenerationHistory().then(h => { setHistoryFree(h?.images_free || []); setHistoryProject(h?.images_project || []) })
     fetchActiveConfig('image').then(cfg => {
       const model = cfg?.model || ''
       setFreeModel(model)
       setProjectModel(model)
       fetchImageResolutions(model || undefined).then(r => {
-        setResolutions(r.resolutions)
-        setRatioGroups(r.groups)
-        const ratios = Object.keys(r.groups)
-        const defaultRatio = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
-        setSelectedRatio(defaultRatio)
-        setFreeSize(r.resolutions[0] || '1024x1024')
-        setProjectSize(r.resolutions[0] || '1024x1024')
+        setFreeResolutions(r.resolutions)
+        setFreeRatioGroups(r.groups || {})
+        setProjResolutions(r.resolutions)
+        setProjRatioGroups(r.groups || {})
+        const prefer = '16:9'
+        const firstGroup = (r.groups && r.groups[prefer]) ? prefer : (Object.keys(r.groups || {})[0] || '')
+        const firstSize = r.groups?.[firstGroup]?.[0] || r.resolutions?.[0] || ''
+        setFreeSelectedRatio(firstGroup || '')
+        setFreeSize(firstSize)
+        setProjSelectedRatio(firstGroup || '')
+        setProjectSize(firstSize)
       })
     })
+
+    // 从 URL 参数恢复项目名
+    const params = new URLSearchParams(location.search)
+    const projectFromUrl = params.get('project')
+    if (projectFromUrl) {
+      fetchProjects().then(list => {
+        if (list.some(p => p.name === projectFromUrl)) {
+          handleProjectSwitch(projectFromUrl)
+          setMode('project')
+        }
+      })
+    } else {
+      const savedProject = localStorage.getItem('lastProject')
+      if (savedProject) {
+        fetchProjects().then(list => {
+          if (list.some(p => p.name === savedProject)) {
+            handleProjectSwitch(savedProject)
+            setMode('project')
+          }
+        })
+      }
+    }
   }, [])
 
-  // 模型切换时更新分辨率列表和默认尺寸
-  useEffect(() => {
-    if (mode === 'free') {
-      fetchImageResolutions(freeModel || undefined).then(r => {
-        setResolutions(r.resolutions)
-        setRatioGroups(r.groups)
-        const ratios = Object.keys(r.groups)
-        const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
-        setSelectedRatio(first)
-        setFreeSize(r.resolutions[0] || '1024x1024')
-      })
-    }
-  }, [freeModel, mode])
-
-  useEffect(() => {
-    if (mode === 'project') {
-      fetchImageResolutions(projectModel || undefined).then(r => {
-        setResolutions(r.resolutions)
-        setRatioGroups(r.groups)
-        const ratios = Object.keys(r.groups)
-        const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
-        setSelectedRatio(first)
-        setProjectSize(r.resolutions[0] || '1024x1024')
-      })
-    }
-  }, [projectModel, mode])
-
-  useEffect(() => {
-    if (!selectedProject) { setCharacters([]); setScenes([]); setGeneratedImages({ characters: {}, scenes: {} }); return }
+  const handleProjectSwitch = async (name: string) => {
+    setSelectedProject(name)
+    localStorage.setItem('lastProject', name)
+    setSelectedChar(null)
+    setSelectedScene(null)
+    setAutoRefUrls([])
+    setManualRefUrls([])
+    setProjectPrompt('')
+    setAutoRefUrlsByType({ style: [], character: [], scene: [], prop: [] })
+    setManualRefUrlsByType({ style: [], character: [], scene: [], prop: [] })
+    setSelectedProp(null)
     setLoading(true)
-    Promise.all([
-      fetchCharacters(selectedProject),
-      fetchScenes(selectedProject),
-      fetchProjectImages(selectedProject),
-    ]).then(([chars, scns, imgs]) => {
-      const sortedChars = [...chars].sort((a, b) => {
-        if (a.type === 'main' && b.type !== 'main') return -1
-        if (a.type !== 'main' && b.type === 'main') return 1
-        return 0
-      })
-      const seenScenes = new Set<string>()
-      const sortedScenes: any[] = []
-      for (const s of scns) {
-        if (!seenScenes.has(s.name)) {
-          seenScenes.add(s.name)
-          sortedScenes.push(s)
-        }
-      }
-      setCharacters(sortedChars)
-      setScenes(sortedScenes)
+    try {
+      const [chars, scns, prps] = await Promise.all([
+        fetchCharacters(name),
+        fetchScenes(name),
+        fetchProps(name),
+      ])
+      setCharacters(chars)
+      setScenes(scns)
+      setProps(prps)
+    } catch {}
+    try {
+      const imgs = await fetchProjectImages(name)
       setGeneratedImages(imgs)
-    }).finally(() => setLoading(false))
-  }, [selectedProject])
-
-  const toggleChar = (name: string) => {
-    setSelectedCharNames(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
+    } catch {}
+    fetchGenerationHistory().then(h => setHistoryProject(h?.images_project || []))
+    setLoading(false)
   }
 
-  const toggleScene = (name: string) => {
-    setSelectedSceneNames(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
+  const handleExtract = async () => {
+    setExtracting(true)
+    setExtractLog('⏳ 正在提取角色/场景/道具...')
+    try {
+      const start = Date.now()
+      const res = await fetch(`/api/projects/${encodeURIComponent(selectedProject)}/re-extract-visual`, { method: 'POST' })
+      if (!res.ok) throw new Error('提取失败')
+      const data = await res.json()
+      const [chars, scns, prps] = await Promise.all([
+        fetchCharacters(selectedProject),
+        fetchScenes(selectedProject),
+        fetchProps(selectedProject),
+      ])
+      setCharacters(chars)
+      setScenes(scns)
+      setProps(prps)
+      setExtractLog(`✅ 提取完成：${data.characters} 个角色，${data.scenes} 个场景（用时 ${Math.round((Date.now() - start) / 1000)} 秒）`)
+    } catch (e: any) {
+      setExtractLog(`❌ 提取失败：${e.message}`)
+    }
+    setExtracting(false)
+  }
+
+  const handleCharSelect = async (name: string | null) => {
+    if (name === selectedChar) { setSelectedChar(null); setProjectPrompt(''); setAutoRefUrls([]); setPromptLocked(false); return }
+    setSelectedChar(name)
+    setSelectedScene(null)
+    if (!name) return
+    if (promptLocked) return
+    try {
+      const result = await fetchCharacterPrompt(selectedProject, name)
+      let finalPrompt = result.prompt || ''
+      if (result.style_decl) {
+        finalPrompt = `${result.style_decl.trim()}\n\n${finalPrompt}`
+      }
+      setProjectPrompt(finalPrompt)
+
+      const isVariant = name.includes('_')
+      if (isVariant && result.base_character) {
+        const baseImages = await fetchCharacterConfirmedImages(selectedProject, result.base_character)
+        if (baseImages.images.length > 0) {
+          setAutoRefUrls(baseImages.images.map(img => img.url))
+          setAutoRefUrlsByType(prev => ({ ...prev, character: baseImages.images.map(img => img.url) }))
+        }
+      } else {
+        const selfImages = await fetchCharacterConfirmedImages(selectedProject, name)
+        if (selfImages.images.length > 0) {
+          setAutoRefUrls(selfImages.images.map(img => img.url))
+          setAutoRefUrlsByType(prev => ({ ...prev, character: selfImages.images.map(img => img.url) }))
+        } else {
+          setAutoRefUrls([])
+          setAutoRefUrlsByType(prev => ({ ...prev, character: [] }))
+        }
+      }
+    } catch {
+      setProjectPrompt('')
+      setAutoRefUrls([])
+      setAutoRefUrlsByType(prev => ({ ...prev, character: [] }))
+    }
+    setUseCharTemplate(false)
+  }
+
+  const handleSceneSelect = async (name: string | null) => {
+    if (name === selectedScene) { setSelectedScene(null); setProjectPrompt(''); setAutoRefUrls([]); setPromptLocked(false); return }
+    setSelectedScene(name)
+    setSelectedChar(null)
+    if (!name) return
+    if (promptLocked) return
+    try {
+      const result = await fetchScenePrompt(selectedProject, name)
+      let finalPrompt = result.prompt || ''
+      if (result.style_decl) {
+        finalPrompt = `${result.style_decl.trim()}\n\n${finalPrompt}`
+      }
+      setProjectPrompt(finalPrompt)
+
+      if (result.base_scene) {
+        const baseImages = await fetchSceneConfirmedImages(selectedProject, result.base_scene)
+        if (baseImages.images.length > 0) {
+          setAutoRefUrls(baseImages.images.map(img => img.url))
+        }
+      } else {
+        const selfImages = await fetchSceneConfirmedImages(selectedProject, name)
+        if (selfImages.images.length > 0) {
+          setAutoRefUrls(selfImages.images.map(img => img.url))
+        } else {
+          setAutoRefUrls([])
+        }
+      }
+    } catch {
+      setProjectPrompt('')
+      setAutoRefUrls([])
+    }
+    setUseSceneTemplate(false)
+  }
+
+  const handlePropSelect = async (charName: string, propName: string) => {
+    const propKey = `${charName}/${propName}`
+    if (propKey === selectedProp) { setSelectedProp(null); setProjectPrompt(''); return }
+    setSelectedProp(propKey)
+    setSelectedChar(null)
+    setSelectedScene(null)
+    try {
+      const result = await fetchPropPrompt(selectedProject, charName, propName)
+      const styleDecl = result.style_decl || ''
+      const finalPrompt = styleDecl ? `${styleDecl.trim()}\n\n${result.prompt}` : result.prompt
+      setProjectPrompt(finalPrompt || '')
+    } catch {
+      setProjectPrompt('')
+    }
+  }
+
+  const handleDemandPropSelect = (propName: string, propPrompt: string) => {
+    if (propName === selectedProp) { setSelectedProp(null); setProjectPrompt(''); return }
+    setSelectedProp(propName)
+    setSelectedChar(null)
+    setSelectedScene(null)
+    setProjectPrompt(propPrompt || '')
   }
 
   const handleFreeGen = async () => {
@@ -141,36 +280,80 @@ export default function ImageGenPage() {
     setFreeError('')
     setFreeGenerating(true)
     try {
-      const result = await freeImageGen(freePrompt, freeNegative, freeSize, freeCount, freeModel)
+      let finalPrompt = freePrompt
+      const finalParams: Record<string, unknown> = {}
+      if (selectedPreset) {
+        if (selectedPreset.prompt_suffix) {
+          finalPrompt = `${freePrompt}，${selectedPreset.prompt_suffix}`
+        }
+        if (selectedPreset.style_params) {
+          Object.assign(finalParams, selectedPreset.style_params)
+        }
+      }
+      const result = await freeImageGen(finalPrompt, freeNegative, freeSize, freeCount, freeModel, freeRefUrls, freeRefUrlsByType, finalParams)
+      if (result.task_id) setCurrentTaskId(result.task_id)
       setFreeResults(prev => [...result.images, ...prev])
       fetchGenerationHistory().then(h => setHistoryFree(h.images_free))
-    } catch (e: any) {
-      setFreeError(e.message || '生成失败，请检查 API Key 是否配置正确')
-      toast(e.message, 'error')
+    } catch (e: unknown) {
+      setFreeError(e instanceof Error ? e.message || '生成失败，请检查 API Key 是否配置正确' : '生成失败，请检查 API Key 是否配置正确')
+      toast(e instanceof Error ? e.message : '生成失败', 'error')
     }
     setFreeGenerating(false)
+    setCurrentTaskId(null)
+  }
+
+  const handleCancelGen = async () => {
+    if (!currentTaskId) return
+    try {
+      await fetch('/api/image-gen/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: currentTaskId }),
+      })
+    } catch {}
+    setCurrentTaskId(null)
+    setFreeGenerating(false)
+    setProjectGenerating(false)
+  }
+
+  const handleRemix = (entry: HistoryEntry) => {
+    setMode('free')
+    if (entry.prompt) setFreePrompt(entry.prompt)
+    if (entry.negative_prompt) setFreeNegative(entry.negative_prompt)
+    if (entry.model) setFreeModel(entry.model)
+    if (entry.size) { setFreeSize(entry.size); }
+    if (entry.count) setFreeCount(Number(entry.count))
+    if (entry.reference_urls && entry.reference_urls.length > 0) {
+      setFreeRefUrls(entry.reference_urls)
+    }
+    toast('已加载历史参数', 'success')
   }
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, hsl(170, 70%, 55%), transparent 70%)' }} />
-      </div>
+      <Starfield />
 
       <div className="max-w-5xl mx-auto px-6 py-10 relative z-10">
-        <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground mb-8 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> 返回首页
+        <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 mb-8 transition-all text-xs">
+          <ArrowLeft className="w-3.5 h-3.5" /> 返回首页
         </button>
 
-        <h1 className="text-2xl font-bold mb-2"><span className="gradient-text">🖼️ 智能生图</span></h1>
-        <p className="text-sm text-muted-foreground mb-6">自由创作 · 角色定妆照 · 场景概念图</p>
+        <h1 className="text-[clamp(28px,5vw,42px)] font-black tracking-[-0.04em] leading-none mb-2"
+          style={{
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 100%)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>
+          🖼️ 智能生图
+        </h1>
+        <p className="text-xs text-white/15 tracking-wider mb-6">自由创作 · 角色定妆照 · 场景概念图</p>
 
-        <div className="flex gap-2 mb-8">
-          <button onClick={() => setMode('free')} className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${mode === 'free' ? 'bg-primary/20 text-primary border-2 border-primary/50' : 'border-2 border-border text-muted-foreground hover:border-primary/30'}`}>
+        <div className="flex gap-2 mb-6">
+          <button onClick={() => setMode('free')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
+            style={mode === 'free' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
             ✏️ 自由创作
           </button>
-          <button onClick={() => setMode('project')} className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${mode === 'project' ? 'bg-primary/20 text-primary border-2 border-primary/50' : 'border-2 border-border text-muted-foreground hover:border-primary/30'}`}>
+          <button onClick={() => setMode('project')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
+            style={mode === 'project' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
             📂 项目模式
           </button>
         </div>
@@ -184,28 +367,60 @@ export default function ImageGenPage() {
             freeGenerating={freeGenerating}
             freeError={freeError}
             freeResults={freeResults}
-            resolutions={resolutions}
-            ratioGroups={ratioGroups}
-            selectedRatio={selectedRatio}
+            resolutions={freeResolutions}
+            ratioGroups={freeRatioGroups}
+            selectedRatio={freeSelectedRatio}
             freeModel={freeModel}
+            referenceUrls={freeRefUrls}
+            referenceUrlsByType={freeRefUrlsByType}
+            onReferenceUrlsByTypeChange={setFreeRefUrlsByType}
+            presets={presets}
+            selectedPreset={selectedPreset}
+            currentTaskId={currentTaskId}
+            onCancel={handleCancelGen}
+            onReferenceUrlsChange={setFreeRefUrls}
             onPromptChange={setFreePrompt}
             onNegativeChange={setFreeNegative}
             onSizeChange={setFreeSize}
             onCountChange={setFreeCount}
-            onRatioChange={setSelectedRatio}
+            onRatioChange={setFreeSelectedRatio}
             onModelChange={setFreeModel}
+            onPresetSelect={setSelectedPreset}
             onGenerate={handleFreeGen}
             onClearResults={() => setFreeResults([])}
+            onPreview={setPreviewSrc}
           />
 
         ) : (
+          <>
+          {selectedProject && characters.length === 0 && scenes.length === 0 && (
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={handleExtract} disabled={extracting}
+                className="flex items-center gap-1.5 px-4 py-3 rounded-xl border-2 border-white/[0.15] text-sm font-medium hover:bg-white/[0.04] disabled:opacity-50 transition-all whitespace-nowrap">
+                {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {extracting ? '提取中...' : '🔄 视觉提取'}
+              </button>
+              {extractLog && (
+                <p className={`text-xs ${extractLog.includes('✅') ? 'text-green-400' : extractLog.includes('❌') ? 'text-red-400' : 'text-white/55'}`}>
+                  {extractLog}
+                </p>
+              )}
+            </div>
+          )}
           <ProjectImageGenForm
             projects={projects}
             selectedProject={selectedProject}
             characters={characters}
             scenes={scenes}
-            selectedCharNames={selectedCharNames}
-            selectedSceneNames={selectedSceneNames}
+            propsList={props}
+            selectedChar={selectedChar}
+            selectedScene={selectedScene}
+            autoRefUrls={autoRefUrls}
+            manualRefUrls={manualRefUrls}
+            onManualRefUrlsChange={setManualRefUrls}
+            autoRefUrlsByType={autoRefUrlsByType}
+            manualRefUrlsByType={manualRefUrlsByType}
+            onManualRefUrlsByTypeChange={setManualRefUrlsByType}
             projectPrompt={projectPrompt}
             projectNegative={projectNegative}
             projectSize={projectSize}
@@ -220,29 +435,50 @@ export default function ImageGenPage() {
             expandedVersions={expandedVersions}
             showAllProject={showAllProject}
             previewSrc={previewSrc}
-            resolutions={resolutions}
-            ratioGroups={ratioGroups}
-            selectedRatio={selectedRatio}
+            resolutions={projResolutions}
+            ratioGroups={projRatioGroups}
+            selectedRatio={projSelectedRatio}
             projectModel={projectModel}
+            presets={presets}
+            selectedPreset={projSelectedPreset}
+            onPresetSelect={setProjSelectedPreset}
+            currentTaskId={currentTaskId}
+            onCancel={handleCancelGen}
             loading={loading}
-            onProjectChange={(v) => { setSelectedProject(v); setSelectedCharNames([]); setSelectedSceneNames([]); setProjectPrompt('') }}
-            onCharToggle={toggleChar}
-            onSceneToggle={toggleScene}
+            onProjectChange={(v) => { handleProjectSwitch(v) }}
+            onCharSelect={handleCharSelect}
+            onSceneSelect={handleSceneSelect}
+            selectedProp={selectedProp}
+            onPropSelect={handlePropSelect}
+            onDemandPropSelect={handleDemandPropSelect}
+            onModelChange={setProjectModel}
             onPromptChange={setProjectPrompt}
             onNegativeChange={setProjectNegative}
             onSizeChange={setProjectSize}
             onCountChange={setProjectCount}
-            onRatioChange={setSelectedRatio}
-            onModelChange={setProjectModel}
+            onRatioChange={setProjSelectedRatio}
             onCharTemplateChange={setUseCharTemplate}
             onSceneTemplateChange={setUseSceneTemplate}
+            promptLocked={promptLocked}
+            onPromptLockToggle={() => setPromptLocked(!promptLocked)}
+            refTypeEnabled={refTypeEnabled}
+            onRefTypeToggle={(type) => setRefTypeEnabled(prev => ({ ...prev, [type]: !prev[type] }))}
             onToggleShowAll={() => setShowAllProject(!showAllProject)}
             onClearResults={() => setProjectResults([])}
             onToggleVersion={(key) => setExpandedVersions(prev => ({ ...prev, [key]: !prev[key] }))}
-            onConfirmVersion={confirmVersion}
-            onDeleteVersion={deleteVersion}
+            onConfirmVersion={async (project, type, name, version) => {
+              await confirmVersion(project, type, name, version)
+              const imgs = await fetchProjectImages(project)
+              setGeneratedImages(imgs)
+            }}
+            onDeleteVersion={async (project, type, name, version) => {
+              try { await deleteVersion(project, type, name, version) } catch {}
+              const imgs = await fetchProjectImages(project)
+              setGeneratedImages(imgs)
+            }}
             onPreview={setPreviewSrc}
             onConfirmDelete={setConfirmDelete}
+            onRemix={handleRemix}
             confirmDelete={confirmDelete}
             setShowAllProject={setShowAllProject}
             setExpandedVersions={setExpandedVersions}
@@ -253,26 +489,48 @@ export default function ImageGenPage() {
             setProjectGenerating={setProjectGenerating}
             setGeneratedImages={setGeneratedImages}
           />
+          </>
         )}
 
         {mode === 'free' && historyFree.length > 0 && (
-          <div className="glass-card rounded-2xl p-5 mt-6 opacity-70">
+          <div className="rounded-2xl p-5 mt-6 card-glow glass-card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm">✏️ 自由创作历史</h3>
               {historyFree.length > 9 && (
-                <button onClick={() => setShowAllFree(!showAllFree)} className="text-[10px] text-muted-foreground hover:text-primary transition-colors">
+                <button onClick={() => setShowAllFree(!showAllFree)} className="text-[10px] text-white/55 hover:text-white transition-colors">
                   {showAllFree ? '收起' : `查看全部 (${historyFree.length})`}
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {(showAllFree ? historyFree : historyFree.slice(0, 9)).map((img, i) => (
-                <div key={i} className="bg-muted rounded-xl overflow-hidden group relative cursor-pointer" onClick={() => setPreviewSrc(img.url)}>
-                  <img src={img.url} alt="" className="w-full h-40 object-contain bg-white" />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 pointer-events-none" onClick={e => e.stopPropagation()}>
-                    <a href={img.url} download={img.name} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white pointer-events-auto" title="下载"><Download className="w-4 h-4" /></a>
-                    <button onClick={async (e) => { e.stopPropagation(); setConfirmDelete({ message: '确认删除这张图片？', action: async () => { try { await deleteGeneratedFile(img.url); setHistoryFree(prev => prev.filter((_, j) => j !== i)); } catch (_) {} } }) }}
-                      className="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-white pointer-events-auto" title="删除"><Trash2 className="w-4 h-4" /></button>
+                <div key={img.url} className="rounded-xl overflow-hidden group relative cursor-pointer" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <img src={img.url} alt="" className="w-full h-36 object-contain bg-white img-hover"
+                    onClick={() => setPreviewSrc(img.url)} />
+                  <div className="px-2.5 py-2 space-y-1">
+                    <p className="text-[10px] text-white/55 leading-tight truncate">
+                      {img.prompt ? img.prompt.slice(0, 40) + (img.prompt.length > 40 ? '...' : '') : '无 prompt'}
+                    </p>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[10px] text-white/35">{img.model || '-'} · {img.size || '-'}</span>
+                      {img.reference_urls && img.reference_urls.length > 0 && (
+                        <span className="text-[10px] text-amber-400/70">📎 {img.reference_urls.length}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button onClick={(e) => { e.stopPropagation(); handleRemix(img) }}
+                      className="p-1.5 rounded-lg bg-white/[0.12] hover:bg-white/[0.18] text-white text-[10px] pointer-events-auto" title="画同款">
+                      画同款
+                    </button>
+                    <a href={img.url} download={img.name} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white pointer-events-auto" title="下载"
+                      onClick={e => e.stopPropagation()}>
+                      <Download className="w-3 h-3" />
+                    </a>
+                    <button onClick={async (e) => { e.stopPropagation(); setConfirmDelete({ message: '确认删除这张图片？', action: async () => { try { await deleteGeneratedFile(img.url); setHistoryFree(prev => prev.filter((_, j) => j !== i)); } catch {} } }) }}
+                      className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-white pointer-events-auto" title="删除">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -280,14 +538,32 @@ export default function ImageGenPage() {
           </div>
         )}
 
-        {previewSrc && <ImagePreview src={previewSrc} onClose={() => setPreviewSrc(null)} />}
+        {previewSrc && (
+          <ImagePreview src={previewSrc} onClose={() => setPreviewSrc(null)}
+            images={[
+              ...freeResults.map(r => r.local ? `/generated/${r.local.split('\\').pop() || r.local.split('/').pop()}` : r.url),
+              ...projectResults.map(r => r.local ? `/generated/${r.local.split('\\').pop() || r.local.split('/').pop()}` : r.url),
+              ...historyFree.map(r => r.url),
+              ...historyProject.map(r => r.url),
+            ]}
+            onNavigate={(i) => {
+              const all = [
+                ...freeResults.map(r => r.local ? `/generated/${r.local.split('\\').pop() || r.local.split('/').pop()}` : r.url),
+                ...projectResults.map(r => r.local ? `/generated/${r.local.split('\\').pop() || r.local.split('/').pop()}` : r.url),
+                ...historyFree.map(r => r.url),
+                ...historyProject.map(r => r.url),
+              ]
+              if (all[i]) setPreviewSrc(all[i])
+            }}
+          />
+        )}
         {confirmDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setConfirmDelete(null)}>
-            <div className="bg-background border border-border rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
+            <div className="bg-[#01010a] border border-white/[0.10] rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl card-glow" onClick={e => e.stopPropagation()}>
               <p className="text-sm mb-6 text-center">{confirmDelete.message}</p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDelete(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">取消</button>
+                  className="flex-1 py-2.5 rounded-xl border border-white/[0.10] text-sm text-white/55 hover:bg-white/[0.04] transition-colors">取消</button>
                 <button onClick={async () => { try { await confirmDelete.action() } catch {} setConfirmDelete(null) }}
                   className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm hover:bg-red-600 transition-colors">确定删除</button>
               </div>

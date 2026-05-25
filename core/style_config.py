@@ -171,3 +171,32 @@ class StyleConfig:
         config.visual_reference = data.get("visual_reference", "")
         config.action_reference = data.get("action_reference", "")
         return config
+
+    def resolve_art_style(self) -> str:
+        if self.art_style != "7":
+            return self.art_style
+        rules = {
+            ("科幻",): "3",
+            ("奇幻",): "3",
+            ("悬疑",): "1",
+            ("剧情",): "1",
+            ("动作",): "1",
+            ("日韩生活",): "2",
+            ("治愈",): "2",
+            ("日常",): "2",
+            ("古装",): "5",
+            ("仙侠",): "5",
+            ("国风",): "5",
+            ("爱情",): "1",
+            ("喜剧",): "4",
+        }
+        keywords = [k.strip() for k in self.genre.replace("，", ",").split(",") if k.strip()]
+        for rule_tags, style_id in rules.items():
+            for kw in keywords:
+                if kw in rule_tags:
+                    return style_id
+        return "1"
+
+    def resolve_render_style_name(self) -> str:
+        resolved = self.resolve_art_style()
+        return RENDER_STYLES.get(resolved, {}).get("name", "写实/真人")

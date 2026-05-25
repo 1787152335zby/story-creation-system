@@ -20,6 +20,7 @@ export interface ChunkInfo {
   name: string
   index: number
   total: number
+  filePath?: string
 }
 
 export interface EpisodeInfo {
@@ -49,6 +50,7 @@ export function useWebSocket() {
   const [awaitingEpisodeApproval, setAwaitingEpisodeApproval] = useState(false)
   const [currentEpisode, setCurrentEpisode] = useState<EpisodeInfo | null>(null)
   const [confirmedPhaseIndex, setConfirmedPhaseIndex] = useState<number | null>(null)
+  const [pausedPhaseIndex, setPausedPhaseIndex] = useState<number | null>(null)
 
   const cleanup = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -142,6 +144,7 @@ export function useWebSocket() {
           break
         case 'phase_confirmed':
           setConfirmedPhaseIndex(msg.phase_index ?? null)
+          setPausedPhaseIndex(null)
           setStreamDone(true)
           setAwaitingEpisodeApproval(false)
           break
@@ -150,7 +153,14 @@ export function useWebSocket() {
             setChunksCompleted(prev => {
               const pi = msg.phase_index!
               const chunks = [...(prev[pi] || [])]
-              chunks.push({ name: msg.chunk_name!, index: msg.chunk_index ?? 0, total: msg.total_chunks ?? 1 })
+              // 去重：同一 index 的已存在则替换
+              const existingIdx = chunks.findIndex(c => c.index === (msg.chunk_index ?? 0))
+              const entry = { name: msg.chunk_name!, index: msg.chunk_index ?? 0, total: msg.total_chunks ?? 1, filePath: msg.file_path }
+              if (existingIdx >= 0) {
+                chunks[existingIdx] = entry
+              } else {
+                chunks.push(entry)
+              }
               return { ...prev, [pi]: chunks }
             })
           }
@@ -167,6 +177,20 @@ export function useWebSocket() {
             })
           }
           break
+        case 'phase_paused':
+          setStreamDone(true)
+          setConfirmedPhaseIndex(null)
+          setPausedPhaseIndex(msg.phase_index ?? null)
+          setAwaitingEpisodeApproval(false)
+          if (msg.phase_index !== undefined) setCurrentPhase(msg.phase_index)
+          setPhases(prev => {
+            const next = [...prev]
+            if (msg.phase_index !== undefined && next[msg.phase_index]) {
+              next[msg.phase_index] = { ...next[msg.phase_index], status: 'paused' }
+            }
+            return next
+          })
+          break
         case 'all_complete':
           setIsComplete(true)
           setAwaitingApproval(false)
@@ -176,6 +200,9 @@ export function useWebSocket() {
         case 'error':
           setError(msg.message || 'Unknown error')
           isGeneratingRef.current = false
+          break
+        case 'reconnect_status':
+          // 后台任务仍在运行，不做特殊处理
           break
       }
     }
@@ -228,6 +255,7 @@ export function useWebSocket() {
 
   const proceedGeneration = useCallback(() => {
     send({ action: 'proceed' })
+    setPausedPhaseIndex(null)
   }, [send])
 
   const disconnect = useCallback(() => {
@@ -249,14 +277,15 @@ export function useWebSocket() {
     setStreamDone(false)
   }, [send])
 
-  const episodeApprove = useCallback(() => {
-    send({ action: 'episode_approve' })
+  const episodeConfirm = useCallback((phaseIndex?: number) => {
+    send({ action: 'episode_confirm' })
     setAwaitingEpisodeApproval(false)
+    if (phaseIndex !== undefined) setPausedPhaseIndex(phaseIndex)
     setStreamDone(false)
   }, [send])
 
-  const episodeConfirm = useCallback(() => {
-    send({ action: 'episode_confirm' })
+  const episodeApprove = useCallback(() => {
+    send({ action: 'episode_approve' })
     setAwaitingEpisodeApproval(false)
     setStreamDone(false)
   }, [send])
@@ -273,9 +302,9 @@ export function useWebSocket() {
 
   return {
     connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream,
-    episodeApprove, episodeConfirm, episodeRevise,
+    episodeConfirm, episodeApprove, episodeRevise,
     connected, streamContent, currentPhase, phases,
     progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error, chunksCompleted,
-    awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase,
+    awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase, pausedPhaseIndex,
   }
 }

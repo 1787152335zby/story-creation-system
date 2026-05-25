@@ -28,7 +28,7 @@ class VideoProducer(AgentBase):
 
         yield f"📋 检测到 {len(segments)} 个视频片段\n"
 
-        clips_dir = project.project_dir / "08_视频" / "片段"
+        clips_dir = project.project_dir / "07_生成素材" / "视频"
         clips_dir.mkdir(parents=True, exist_ok=True)
 
         video_paths = []
@@ -46,14 +46,18 @@ class VideoProducer(AgentBase):
         if len(video_paths) >= 2 and VideoConcat.is_ffmpeg_available():
             yield "🔗 拼接视频片段...\n"
             try:
-                output_path = str(project.project_dir / "08_视频" / "成片.mp4")
+                output_dir = project.project_dir / "07_生成素材" / "视频" / "成片"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = str(output_dir / "全片.mp4")
                 VideoConcat.concat(video_paths, output_path)
                 yield f"✅ 成片已保存: {output_path}\n"
             except Exception as e:
                 yield f"⚠️ 拼接失败 (可手动拼接): {e}\n"
         elif video_paths:
             import shutil
-            output_path = str(project.project_dir / "08_视频" / "成片.mp4")
+            output_dir = project.project_dir / "07_生成素材" / "视频" / "成片"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(output_dir / "全片.mp4")
             shutil.copy2(video_paths[0], output_path)
             yield f"✅ 已保存单片段成片\n"
 
@@ -66,7 +70,7 @@ class VideoProducer(AgentBase):
         yield f"🎬 生成片段 {segment_index+1}/{len(segments)}：{seg['name']}...\n"
         try:
             video_url = self._generate_clip(project, seg)
-            clips_dir = project.project_dir / "08_视频" / "片段"
+            clips_dir = project.project_dir / "07_生成素材" / "视频"
             clips_dir.mkdir(parents=True, exist_ok=True)
             clip_path = str(clips_dir / f"片段_{segment_index+1:03d}.mp4")
             self._download_video(video_url, clip_path)
@@ -97,15 +101,21 @@ class VideoProducer(AgentBase):
         return None
 
     def _parse_prompt_segments(self, project: ProjectManager) -> list[dict]:
-        prompts_path = project.project_dir / "05_提示词" / "提示词.md"
-        if not prompts_path.exists():
-            alt_files = sorted((project.project_dir / "05_提示词").glob("提示词_*.md"))
+        prompts_dirs = [project.project_dir / "06_提示词", project.project_dir / "05_分镜脚本"]
+        content = ""
+        for prompts_dir in prompts_dirs:
+            if not prompts_dir.exists():
+                continue
+            prompts_path = prompts_dir / "提示词.md"
+            if prompts_path.exists():
+                content = prompts_path.read_text(encoding="utf-8")
+                break
+            alt_files = sorted(prompts_dir.glob("提示词_*.md"))
             if alt_files:
                 content = "\n\n".join(f.read_text(encoding="utf-8") for f in alt_files)
-            else:
-                return []
-        else:
-            content = prompts_path.read_text(encoding="utf-8")
+                break
+        if not content:
+            return []
 
         segments = []
         pattern = re.compile(r"#{1,4}\s*(第\d+[场集]|镜头\d+)", re.MULTILINE)

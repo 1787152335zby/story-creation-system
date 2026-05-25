@@ -21,11 +21,10 @@ LLM_MODELS = {
     "deepseek": {
         "name": "DeepSeek",
         "models": [
-            {"value": "deepseek-chat", "label": "DeepSeek Chat"},
+            {"value": "deepseek-chat", "label": "DeepSeek Chat（稳定版）"},
+            {"value": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（实验版）"},
+            {"value": "deepseek-v4-pro", "label": "DeepSeek V4 Pro"},
             {"value": "deepseek-reasoner", "label": "DeepSeek Reasoner"},
-            {"value": "siliconflow/deepseek-v3.2", "label": "DS V3.2 (SiliconFlow)"},
-            {"value": "siliconflow/deepseek-v3-0324", "label": "DS V3 (SiliconFlow)"},
-            {"value": "siliconflow/deepseek-r1-0528", "label": "DS R1 (SiliconFlow)"},
         ]
     },
     "openai": {

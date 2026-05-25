@@ -53,7 +53,7 @@ class ScreenplayWriter(AgentBase):
             pass
         return meta
 
-    def generate_chunk(self, ctx, template, style_context, writing_style_name, script_style_name, script_format_name, story_type_name, style, plan, input_content, feedback=""):
+    def generate_chunk(self, ctx, template, style_context, writing_style_name, script_style_name, script_format_name, story_type_name, style, plan, input_content, feedback="", chunk_name=""):
         self._last_chunk_output = ""
 
         prompt = template.replace("{style_config}", style_context)
@@ -85,7 +85,9 @@ class ScreenplayWriter(AgentBase):
         prompt += prev_plot_context
         prompt += prev_screenplay_context
 
-        prompt += f"\n\n请只写「{ctx.name}」的剧本内容，严格覆盖本幕剧情中的每一个事件。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+        prompt += f"\n\n请只写「{ctx.name}」的剧本内容，开头务必以 Markdown 标题标明「## {ctx.name}」，严格覆盖本幕剧情中的每一个事件。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+
+        prompt += f"\n\n当前正在生成：{chunk_name}"
 
         if feedback and ctx.index == plan.chunk_count - 1:
             prompt += f"\n\n## 修改意见\n{feedback}"
@@ -98,6 +100,17 @@ class ScreenplayWriter(AgentBase):
             self._last_chunk_summary = self._extract_summary(ctx.name, self._last_chunk_output)
 
         self._plot_infos.append((ctx.name, input_content))
+
+    @staticmethod
+    def _filter_format_sections(template: str, is_market: bool) -> str:
+        import re
+        if is_market:
+            template = re.sub(r'\{if_system\}.*?\{\/if_system\}', '', template, flags=re.DOTALL)
+            template = template.replace('{if_market}', '').replace('{/if_market}', '')
+        else:
+            template = re.sub(r'\{if_market\}.*?\{\/if_market\}', '', template, flags=re.DOTALL)
+            template = template.replace('{if_system}', '').replace('{/if_system}', '')
+        return template.strip()
 
     def run_stream(self, project: ProjectManager, style: StyleConfig, input_content: str):
         template = self.load_prompt_template("screenplay_writer.txt")
@@ -120,6 +133,11 @@ class ScreenplayWriter(AgentBase):
         script_style_name = SCRIPT_STYLES.get(style.script_style, {}).get("name", "视觉化写作")
         script_format_name = {"1": "系统格式", "2": "市场格式"}.get(style.script_format, "系统格式")
         story_type_name = STORY_TYPES.get(style.story_type, {}).get("name", "未知")
+
+        # 过滤掉非选中的格式说明块
+        is_market = style.script_format == "2"
+        template = self._filter_format_sections(template, is_market)
+        template = template.replace("{script_format}", script_format_name)
 
         plan = ChunkStrategy.get_plan(style.story_type)
         iterator = ChunkIter(plan, plot_structure)
@@ -172,18 +190,29 @@ class ScreenplayWriter(AgentBase):
         script_style_name = SCRIPT_STYLES.get(style.script_style, {}).get("name", "视觉化写作")
         script_format_name = {"1": "系统格式", "2": "市场格式"}.get(style.script_format, "系统格式")
         story_type_name = STORY_TYPES.get(style.story_type, {}).get("name", "未知")
+
+        is_market = style.script_format == "2"
+        template = self._filter_format_sections(template, is_market)
+        template = template.replace("{script_format}", script_format_name)
+
         plan = ChunkStrategy.get_plan(style.story_type)
         iterator = ChunkIter(plan, plot_structure)
         if plan.chunk_count == 0:
-            count_prompt = (f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
-                            f"只输出一个整数。\n\n{plot_structure[:3000]}")
-            count_text = ""
-            for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
-                count_text += token
-            nums = re.findall(r'\d+', count_text)
-            chunk_count = int(nums[0]) if nums else 3
-            chunk_count = max(1, min(chunk_count, 20))
-            iterator.set_auto_blocks(chunk_count)
+            # 优先使用用户配置的集数
+            if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
+                chunk_count = int(style.episode_count)
+                chunk_count = max(1, min(chunk_count, 20))
+                iterator.set_auto_blocks(chunk_count)
+            else:
+                count_prompt = (f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
+                                f"只输出一个整数。\n\n{plot_structure[:3000]}")
+                count_text = ""
+                for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
+                    count_text += token
+                nums = re.findall(r'\d+', count_text)
+                chunk_count = int(nums[0]) if nums else 3
+                chunk_count = max(1, min(chunk_count, 20))
+                iterator.set_auto_blocks(chunk_count)
         self._gen_template = template
         self._gen_style_context = style_context
         self._gen_writing_style_name = writing_style_name
@@ -247,7 +276,7 @@ class ScreenplayWriter(AgentBase):
             prompt += prev_plot_context
             prompt += prev_screenplay_context
 
-            prompt += f"\n\n请只写「{ctx.name}」的剧本内容，严格覆盖本集剧情中的每一个事件。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+            prompt += f"\n\n请只写「{ctx.name}」的剧本内容，开头务必以 Markdown 标题标明「## {ctx.name}」，严格覆盖本集剧情中的每一个事件。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
 
             if feedback and ctx.index == chunk_count - 1:
                 prompt += f"\n\n## 修改意见\n{feedback}"

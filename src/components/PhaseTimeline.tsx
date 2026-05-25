@@ -1,8 +1,7 @@
-import { ArrowLeft, Eye, ChevronDown, FolderOpen, Sparkles, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Eye, ChevronDown, FolderOpen, Sparkles, RefreshCw, Pencil } from 'lucide-react'
 import type { ChunkInfo } from '../hooks/useWebSocket'
-
-const PHASE_NAMES = ['故事大纲', '完整剧情', '完整剧本', '分镜脚本', '视觉提取', '提示词生成']
-const PHASE_ICONS = ['📋', '📖', '🎭', '🎬', '🔍', '💬']
+import { renameProject } from '../lib/api'
+import { getPhaseNames, PHASE_ICONS } from '../lib/constants'
 
 interface PhaseData {
   done: boolean
@@ -47,32 +46,50 @@ export default function PhaseTimeline({
     return 'pending'
   }
 
-  const activePhaseCount = PHASE_NAMES.length
+  const activePhaseCount = getPhaseNames(projectConfig?.style_type).length
   const donePhaseCount = (projectConfig?.phases || []).filter((p: any) => p.done).length
 
   return (
-    <aside className="w-64 border-r border-border bg-card/80 backdrop-blur-sm flex flex-col relative z-10">
-      <div className="p-5 border-b border-border/50">
-        <button onClick={() => onNavigate('/')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground text-sm mb-3 transition-colors">
+    <aside className="w-64 border-r flex flex-col relative z-10" style={{ borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+      <div className="p-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
+        <button onClick={() => onNavigate('/home')} className="flex items-center gap-1.5 text-sm mb-3 transition-colors" style={{ color: 'rgba(255,255,255,0.60)' }}>
           <ArrowLeft className="w-4 h-4" /> 返回首页
         </button>
         <div className="flex items-center justify-between">
-          <h2 className="font-bold truncate">{name}</h2>
+          <h2 className="font-bold truncate" style={{ color: 'rgba(255,255,255,0.90)' }}>{name}</h2>
           <div className="flex items-center gap-1">
+            <button onClick={() => {
+              const newName = prompt('输入新项目名称：', name)
+              if (newName && newName.trim() && newName.trim() !== name) {
+                renameProject(name, newName.trim()).then(() => window.location.reload())
+              }
+            }} className="p-1.5 rounded-lg transition-all" style={{ background: 'transparent', color: 'rgba(255,255,255,0.50)' }}
+              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = 'rgba(255,255,255,0.80)' }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.50)' }}
+              title="重命名项目">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
             <button onClick={onShowTemplateModal}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border hover:bg-muted text-[10px] text-muted-foreground hover:text-foreground transition-all" title="将当前项目的风格配置保存为模板">
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg border transition-all text-[10px]"
+              style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.50)' }}
+              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = 'rgba(255,255,255,0.80)' }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.50)' }}
+              title="将当前项目的风格配置保存为模板">
               <Sparkles className="w-3 h-3" /> 存为模板
             </button>
-            <button onClick={onOpenFolder} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-all" title="打开文件夹">
+            <button onClick={onOpenFolder} className="p-1.5 rounded-lg transition-all" style={{ color: 'rgba(255,255,255,0.50)' }}
+              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = 'rgba(255,255,255,0.80)' }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.50)' }}
+              title="打开文件夹">
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
-        {projectConfig?.genre && <p className="text-xs text-muted-foreground mt-1">{projectConfig.genre}</p>}
+        {projectConfig?.genre && <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.45)' }}>{projectConfig.genre}</p>}
       </div>
 
       <div className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {PHASE_NAMES.map((pname, i) => {
+        {getPhaseNames(projectConfig?.style_type).map((pname, i) => {
           const s = phaseStatus(i)
           const isSelected = selectedPhase === i && !showStream
           const canView = s === 'done'
@@ -82,25 +99,39 @@ export default function PhaseTimeline({
               <button
                 onClick={() => { if (canView) { onViewPhase(i); onSetExpandedPhase(expandedPhase === i ? -1 : i) } }}
                 disabled={!canView}
-                className={`group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-200 ${
-                  isSelected ? 'bg-primary/15 text-primary font-medium'
-                  : s === 'active' ? 'bg-primary/5 text-primary animate-shimmer'
-                  : s === 'done' ? 'text-green-400 hover:bg-green-400/5 cursor-pointer'
-                  : 'text-muted-foreground cursor-default'
-                }`}
+                className={`group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-200`}
+                style={{
+                  background: isSelected ? 'rgba(255,255,255,0.15)' : s === 'active' ? 'rgba(255,255,255,0.08)' : s === 'done' ? 'transparent' : 'transparent',
+                  color: isSelected ? 'rgba(255,255,255,0.95)' : s === 'active' ? 'rgba(255,255,255,0.85)' : s === 'done' ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.40)',
+                  fontWeight: isSelected || s === 'active' ? 500 : 400,
+                  cursor: canView ? 'pointer' : 'default'
+                }}
+                onMouseOver={(e) => {
+                  if (s === 'done') {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!isSelected && s !== 'active') {
+                    e.currentTarget.style.background = 'transparent';
+                  }
+                }}
               >
                 <span className="text-sm flex-shrink-0">{PHASE_ICONS[i]}</span>
                 <span className="flex-1">{pname}</span>
-                {s === 'active' && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-ping flex-shrink-0" />}
+                {s === 'active' && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 animate-ping" style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }} />}
                 {s === 'done' && <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
                 {s !== 'active' && s !== 'done' && chunksCompleted[i]?.length > 0 && (
                   <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 )}
-                {canView && (isSelected && hasActs ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-50 flex-shrink-0 transition-opacity" />)}
+                {canView && (isSelected && hasActs ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-60 flex-shrink-0 transition-opacity" />)}
                 {s === 'done' && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRedo(i) }}
-                    className="p-1 rounded-md hover:bg-orange-400/10 text-muted-foreground hover:text-orange-400 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-all"
+                    className="p-1 rounded-md text-muted-foreground hover:text-orange-400 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-all"
+                    style={{ color: 'rgba(255,255,255,0.40)' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,165,0,0.10)'; e.currentTarget.style.color = 'rgba(255,165,0,0.80)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.40)' }}
                     title="重新生成"
                   >
                     <RefreshCw className="w-3 h-3" />
@@ -109,38 +140,52 @@ export default function PhaseTimeline({
               </button>
 
               {isSelected && hasActs && actFileList.length > 1 && (
-                <div className="ml-8 mt-0.5 mb-1 space-y-0.5 border-l-2 border-primary/20 pl-3 animate-fade-in">
-                  <button onClick={() => onViewAct(i, '')} className={`w-full text-left text-xs px-2.5 py-1.5 rounded-lg transition-all ${selectedAct === '' ? 'text-primary bg-primary/10 font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
-                    完整内容
+                <div className="ml-8 mt-0.5 mb-1 space-y-0.5 pl-3 animate-fade-in" style={{ borderLeft: '2px solid rgba(255,255,255,0.25)' }}>
+                  <button onClick={() => onViewAct(i, '')} className="w-full text-left text-xs px-2.5 py-1.5 rounded-lg transition-all"
+                    style={{
+                      background: selectedAct === '' ? 'rgba(255,255,255,0.12)' : 'transparent',
+                      color: selectedAct === '' ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.50)',
+                      fontWeight: selectedAct === '' ? 500 : 400
+                    }}
+                    onMouseOver={(e) => {
+                      if (selectedAct !== '') {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+                        e.currentTarget.style.color = 'rgba(255,255,255,0.80)';
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      if (selectedAct !== '') {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = 'rgba(255,255,255,0.50)';
+                      }
+                    }}
+                  >
+                    📄 完整内容
                   </button>
                   {actFileList.map((act) => (
                     <button key={act} onClick={(e) => { e.stopPropagation(); onViewAct(i, act) }}
-                      className={`w-full text-left text-xs px-2.5 py-1.5 rounded-lg transition-all ${selectedAct === act ? 'text-primary bg-primary/10 font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
-                      {act.replace(/^\d+_/, '').replace(/\.md$/, '').replace(/_/g, '')}
+                      className="w-full text-left text-xs px-2.5 py-1.5 rounded-lg transition-all"
+                      style={{
+                        background: selectedAct === act ? 'rgba(255,255,255,0.12)' : 'transparent',
+                        color: selectedAct === act ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.50)',
+                        fontWeight: selectedAct === act ? 500 : 400
+                      }}
+                      onMouseOver={(e) => {
+                        if (selectedAct !== act) {
+                          e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
+                          e.currentTarget.style.color = 'rgba(255,255,255,0.80)';
+                        }
+                      }}
+                      onMouseOut={(e) => {
+                        if (selectedAct !== act) {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.color = 'rgba(255,255,255,0.50)';
+                        }
+                      }}
+                    >
+                      {act.includes('/') ? `✅ ${act.split('/')[0]}` : act.includes('第') ? `✅ ${act.replace(/\.md$/, '').replace(/.*_第/, '第')}` : act.replace(/^\d+_/, '').replace(/\.md$/, '').replace(/_/g, '')}
                     </button>
                   ))}
-                </div>
-              )}
-              {/* 分集进度展示 */}
-              {chunksCompleted[i]?.length > 0 && i !== selectedPhase && i === currentPhase && (
-                <div className="ml-8 mt-1 mb-1 space-y-0.5 border-l-2 border-primary/20 pl-3">
-                  {Array.from({ length: chunksCompleted[i][0]?.total || 1 }, (_, idx) => {
-                    const done = chunksCompleted[i].find(c => c.index === idx)
-                    return (
-                      <div key={idx} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg text-muted-foreground">
-                        <button
-                          onClick={() => { if (done) { onViewAct(i, ''); onSetExpandedPhase(i) } }}
-                          className={`w-full text-left truncate transition-all ${done ? 'hover:text-green-400 cursor-pointer' : 'cursor-default'}`}
-                        >
-                          {done ? (
-                            <span className="text-green-400">✅ 第{idx + 1}集</span>
-                          ) : (
-                            <span className="text-muted-foreground">⏳ 第{idx + 1}集</span>
-                          )}
-                        </button>
-                      </div>
-                    )
-                  })}
                 </div>
               )}
             </div>
@@ -148,23 +193,25 @@ export default function PhaseTimeline({
         })}
       </div>
 
-      <div className="p-4 border-t border-border/50 space-y-3">
+      <div className="p-4 space-y-3" style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }}>
         <label className="flex items-center justify-between gap-2 cursor-pointer">
-          <span className="text-xs text-muted-foreground">自动审核（逐阶段）</span>
+          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.50)' }}>自动审核</span>
           <div className="relative inline-flex items-center cursor-pointer">
             <input type="checkbox" className="sr-only peer" checked={autoApprove}
               onChange={(e) => onAutoApproveChange(e.target.checked)} />
-            <div className="w-8 h-4 bg-muted rounded-full peer peer-checked:bg-green-500/60 peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:start-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all" />
+            <div className="w-8 h-4 rounded-full peer peer-checked:after:translate-x-4 after:content-[''] after:absolute after:top-0.5 after:start-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all"
+              style={{ background: autoApprove ? 'rgba(74,222,128,0.60)' : 'rgba(255,255,255,0.08)' }}
+            />
           </div>
         </label>
         <div>
-          <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
+          <div className="flex justify-between text-xs mb-1.5" style={{ color: 'rgba(255,255,255,0.50)' }}>
             <span>总进度</span>
             <span>{donePhaseCount}/{activePhaseCount}</span>
           </div>
-          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-500 progress-glow"
-              style={{ width: `${(donePhaseCount / activePhaseCount) * 100}%`, background: 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }} />
+          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${(donePhaseCount / activePhaseCount) * 100}%`, background: 'linear-gradient(90deg, hsl(var(--primary)), hsl(265, 87%, 60%))', boxShadow: '0 0 12px rgba(255,255,255,0.25)' }} />
           </div>
         </div>
       </div>

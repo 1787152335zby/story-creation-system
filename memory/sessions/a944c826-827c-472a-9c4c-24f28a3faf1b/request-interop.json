@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "title": "故事大纲生成",
+      "description": "根据用户提供的故事主题、类型和风格要求，自动生成结构完整的故事大纲，支持三幕剧和多集短剧两种结构",
+      "category": "creative",
+      "tags": ["故事创作", "大纲", "剧本", "写作"],
+      "capability_type": "workflow",
+      "delivery_mode": "async",
+      "pricing_model": "free"
+    },
+    {
+      "title": "剧本创作",
+      "description": "将故事大纲扩展为完整剧本，包含人物对白、场景描述、动作指示，支持电影和短剧格式",
+      "category": "creative",
+      "tags": ["剧本", "对白", "场景", "写作"],
+      "capability_type": "workflow",
+      "delivery_mode": "async",
+      "pricing_model": "free"
+    },
+    {
+      "title": "分镜脚本生成",
+      "description": "从剧本自动生成专业分镜头脚本，包含镜头编号、画面描述、运镜方式、台词标注",
+      "category": "creative",
+      "tags": ["分镜", "分镜头", "运镜", "影视"],
+      "capability_type": "workflow",
+      "delivery_mode": "async",
+      "pricing_model": "free"
+    },
+    {
+      "title": "角色与场景AI生图",
+      "description": "根据剧本中的角色描述和场景设定，调用AI图像生成模型生成角色立绘和场景插画",
+      "category": "creative",
+      "tags": ["生图", "角色设计", "场景", "AI绘画"],
+      "capability_type": "workflow",
+      "delivery_mode": "async",
+      "pricing_model": "free"
+    },
+    {
+      "title": "故事短视频生成",
+      "description": "将剧本和分镜结合AI视频生成技术，自动生成故事短视频内容",
+      "category": "creative",
+      "tags": ["视频生成", "短视频", "AI视频", "故事"],
+      "capability_type": "workflow",
+      "delivery_mode": "async",
+      "pricing_model": "free"
+    }
+  ]
+}

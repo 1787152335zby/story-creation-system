@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / ".pkg"))
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(ROOT / ".env")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

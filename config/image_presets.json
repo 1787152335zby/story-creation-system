@@ -1,0 +1,66 @@
+[
+  {
+    "id": "cinematic",
+    "name": "电影感",
+    "description": "电影级光影，浅景深效果",
+    "prompt_suffix": "电影级光影，浅景深，宽银幕比例，细腻质感",
+    "style_params": { "style": "vivid", "quality": "hd" },
+    "model_hint": ""
+  },
+  {
+    "id": "anime",
+    "name": "动漫风",
+    "description": "日式动漫风格，线条清晰",
+    "prompt_suffix": "日式动漫风格，线条清晰，色彩明亮，赛璐珞上色",
+    "style_params": {},
+    "model_hint": ""
+  },
+  {
+    "id": "realistic",
+    "name": "写实摄影",
+    "description": "超写实，照片级真实感",
+    "prompt_suffix": "超写实照片风格，8K，自然光线，毛孔级细节",
+    "style_params": { "style": "natural", "quality": "hd" },
+    "model_hint": ""
+  },
+  {
+    "id": "oil-painting",
+    "name": "油画",
+    "description": "古典油画质感",
+    "prompt_suffix": "油画风格，厚重笔触，亚麻布纹理，暖色调",
+    "style_params": {},
+    "model_hint": ""
+  },
+  {
+    "id": "cyberpunk",
+    "name": "赛博朋克",
+    "description": "霓虹灯，未来都市",
+    "prompt_suffix": "赛博朋克风格，霓虹灯光，雨夜，未来都市，高对比度",
+    "style_params": { "style": "vivid" },
+    "model_hint": ""
+  },
+  {
+    "id": "watercolor",
+    "name": "水彩画",
+    "description": "水彩渲染效果",
+    "prompt_suffix": "水彩画风格，柔和渐变，纸张纹理，透明感",
+    "style_params": {},
+    "model_hint": ""
+  },
+  {
+    "id": "sketch",
+    "name": "素描",
+    "description": "铅笔素描效果",
+    "prompt_suffix": "铅笔素描风格，黑白灰，细腻线条，阴影层次",
+    "style_params": {},
+    "model_hint": ""
+  },
+  {
+    "id": "3d-render",
+    "name": "3D渲染",
+    "description": "PBR材质，3A游戏级渲染",
+    "prompt_suffix": "3D渲染，PBR材质，全局光照，8K纹理，游戏级画质",
+    "style_params": { "quality": "hd" },
+    "model_hint": ""
+  }
+]

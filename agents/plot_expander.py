@@ -110,18 +110,24 @@ class PlotExpander(AgentBase):
         pre_analyzed = ChunkStrategy.pre_analyze_split_points(outline, self.call_llm_stream)
         iterator = ChunkIter(plan, outline, pre_analyzed)
         if plan.chunk_count == 0:
-            count_prompt = (
-                f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
-                f"考虑故事的长度和复杂度。只输出一个整数，不要其他文字。\n\n"
-                f"{outline[:3000]}"
-            )
-            count_text = ""
-            for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
-                count_text += token
-            nums = re.findall(r'\d+', count_text)
-            chunk_count = int(nums[0]) if nums else 3
-            chunk_count = max(1, min(chunk_count, 20))
-            iterator.set_auto_blocks(chunk_count)
+            # 优先使用用户配置的集数
+            if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
+                chunk_count = int(style.episode_count)
+                chunk_count = max(1, min(chunk_count, 20))
+                iterator.set_auto_blocks(chunk_count, outline=outline)
+            else:
+                count_prompt = (
+                    f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
+                    f"考虑故事的长度和复杂度。只输出一个整数，不要其他文字。\n\n"
+                    f"{outline[:3000]}"
+                )
+                count_text = ""
+                for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
+                    count_text += token
+                nums = re.findall(r'\d+', count_text)
+                chunk_count = int(nums[0]) if nums else 3
+                chunk_count = max(1, min(chunk_count, 20))
+                iterator.set_auto_blocks(chunk_count, outline=outline)
         self._gen_template = template
         self._gen_style_context = style_context
         self._gen_writing_style_name = writing_style_name
@@ -138,7 +144,7 @@ class PlotExpander(AgentBase):
 
     def generate_chunk(self, ctx, template, style_context, writing_style_name,
                        screen_aspect_name, story_type_name, style, plan, outline,
-                       feedback=""):
+                       feedback="", chunk_name=""):
         prompt = template.replace("{style_config}", style_context)
         prompt = prompt.replace("{outline}", ctx.outline_section or outline)
         prompt = prompt.replace("{writing_style}", writing_style_name)
@@ -168,7 +174,9 @@ class PlotExpander(AgentBase):
 
         if ctx.summaries:
             prompt += "\n\n## 关键元素追踪\n" + "\n".join(ctx.summaries)
-        prompt += f"\n\n请只写「{ctx.name}」的内容。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+        prompt += f"\n\n请只写「{ctx.name}」的内容，开头务必以 Markdown 标题标明「## {ctx.name}」。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+
+        prompt += f"\n\n当前正在生成：{chunk_name}"
 
         if feedback and ctx.index == (plan.chunk_count or 1) - 1:
             prompt += f"\n\n## 修改意见\n{feedback}"
@@ -197,11 +205,11 @@ class PlotExpander(AgentBase):
         nums = re.findall(r'\d+', count_text)
         chunk_count = int(nums[0]) if nums else 3
         chunk_count = max(1, min(chunk_count, 20))
-        iterator.set_auto_blocks(chunk_count)
+        iterator.set_auto_blocks(chunk_count, outline=outline)
 
         for ctx in iterator:
             prompt = template.replace("{style_config}", style_context)
-            prompt = prompt.replace("{outline}", outline)
+            prompt = prompt.replace("{outline}", ctx.outline_section or outline)
             prompt = prompt.replace("{writing_style}", writing_style_name)
             prompt = prompt.replace("{screen_aspect}", screen_aspect_name)
             duration_label = "自动（由Agent推荐）" if style.duration_mode == "1" else "自定义"
@@ -218,7 +226,7 @@ class PlotExpander(AgentBase):
                 prompt += bridge
             if ctx.summaries:
                 prompt += "\n\n## 关键元素追踪\n" + "\n".join(ctx.summaries)
-            prompt += f"\n\n请只写「{ctx.name}」的内容，这是系列的第{ctx.index+1}部分。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
+            prompt += f"\n\n请只写「{ctx.name}」的内容，这是系列的第{ctx.index+1}部分，开头务必以 Markdown 标题标明「## {ctx.name}」。全部内容输出完毕后，请在末尾加上结束标记：**（全文完）**"
 
             if feedback and ctx.index == iterator.plan.chunk_count - 1:
                 prompt += f"\n\n## 修改意见\n{feedback}"
@@ -284,7 +292,7 @@ class PlotExpander(AgentBase):
             if recent_summaries:
                 prompt += f"\n\n## 近期章节回顾\n" + "\n".join(recent_summaries)
 
-            prompt += f"\n\n请写第{chapter_num}章的内容。这是小说的第{chapter_num}章，共{chapter_count}章。写完后在末尾加上结束标记：**（全文完）**"
+            prompt += f"\n\n请写第{chapter_num}章的内容，开头务必以 Markdown 标题标明「## 第{chapter_num}章」。这是小说的第{chapter_num}章，共{chapter_count}章。写完后在末尾加上结束标记：**（全文完）**"
 
             if feedback:
                 prompt += f"\n\n## 修改意见\n{feedback}"

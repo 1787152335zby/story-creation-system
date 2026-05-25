@@ -18,10 +18,32 @@ class ConnectionManager:
         self.pending_episode_events: Dict[str, asyncio.Event] = {}
         self.episode_results: Dict[str, Optional[dict]] = {}
         self.current_episode_info: Dict[str, Optional[dict]] = {}
+        self.orchestrators: Dict[str, 'AsyncOrchestrator'] = {}
+
+    def set_orchestrator(self, project_name: str, orch: 'AsyncOrchestrator'):
+        self.orchestrators[project_name] = orch
 
     async def connect(self, project_name: str, websocket: WebSocket):
-        self._cancel_task(project_name)
+        # 保留已在后台运行的任务，不断开
         await websocket.accept()
+
+        # 如果有后台任务在运行，先释放旧的等待事件（避免 orchestrator 永久阻塞）
+        # 让 wait_for_xxx 拿到默认结果后继续执行
+        task = self.running_tasks.get(project_name)
+        if task and not task.done():
+            old_evt = self.pending_approvals.get(project_name)
+            if old_evt:
+                old_evt.set()
+            self.approval_results.pop(project_name, None)
+            old_confirm = self.pending_confirms.get(project_name)
+            if old_confirm:
+                old_confirm.set()
+            self.confirm_results.pop(project_name, None)
+            old_ep = self.pending_episode_events.get(project_name)
+            if old_ep:
+                old_ep.set()
+            self.episode_results.pop(project_name, None)
+
         self.active_connections[project_name] = websocket
         self.pending_approvals[project_name] = asyncio.Event()
         self.approval_results[project_name] = None
@@ -32,14 +54,37 @@ class ConnectionManager:
         except Exception:
             self.auto_approve_flags[project_name] = False
 
+        # 如果有后台任务在运行，通知前端当前状态
+        if task and not task.done():
+            asyncio.ensure_future(self._send_reconnect_status(project_name))
+
     def _cancel_task(self, project_name: str):
         old_task = self.running_tasks.pop(project_name, None)
         if old_task and not old_task.done():
             old_task.cancel()
 
     def register_task(self, project_name: str, task: asyncio.Task):
+        # 如果已有后台任务在运行，不覆盖
+        existing = self.running_tasks.get(project_name)
+        if existing and not existing.done():
+            return
         self._cancel_task(project_name)
         self.running_tasks[project_name] = task
+
+    def is_running(self, project_name: str) -> bool:
+        task = self.running_tasks.get(project_name)
+        return task is not None and not task.done()
+
+    def cancel_project_task(self, project_name: str):
+        """外部 HTTP 接口调用删除/重建时清理后台任务"""
+        self._cancel_task(project_name)
+
+    async def _send_reconnect_status(self, project_name: str):
+        """重新连接时告知前端当前运行状态"""
+        await self.send_message(project_name, {
+            "type": "reconnect_status",
+            "message": "后台任务正在运行中...",
+        })
 
     def disconnect(self, project_name: str):
         self.active_connections.pop(project_name, None)
@@ -56,7 +101,9 @@ class ConnectionManager:
             ep_evt.set()
         self.episode_results.pop(project_name, None)
         self.current_episode_info.pop(project_name, None)
-        self._cancel_task(project_name)
+        # 自动审核模式下，断开不取消任务，后台继续生成
+        if not self.auto_approve_flags.get(project_name, False):
+            self._cancel_task(project_name)
 
     async def send_message(self, project_name: str, message: dict):
         ws = self.active_connections.get(project_name)
@@ -64,7 +111,17 @@ class ConnectionManager:
             try:
                 await ws.send_text(json.dumps(message, ensure_ascii=False))
             except Exception:
-                self.disconnect(project_name)
+                self.active_connections.pop(project_name, None)
+                # 释放等待事件，避免 orchestrator 永久阻塞
+                evt = self.pending_approvals.get(project_name)
+                if evt:
+                    evt.set()
+                confirm_evt = self.pending_confirms.get(project_name)
+                if confirm_evt:
+                    confirm_evt.set()
+                ep_evt = self.pending_episode_events.get(project_name)
+                if ep_evt:
+                    ep_evt.set()
 
     async def wait_for_approval(self, project_name: str, phase_index: int) -> dict:
         evt = self.pending_approvals.get(project_name)
@@ -167,6 +224,11 @@ class ConnectionManager:
             evt = self.pending_confirms.get(project_name)
             if evt:
                 evt.set()
+            from core.project_manager import ProjectManager
+            project = ProjectManager(project_name)
+            if project.pending_episode is not None:
+                project.config["_proceed_resume"] = True
+                project.save_config()
         elif action == "skip":
             self.approval_results[project_name] = {"approved": True, "feedback": "", "skip": True}
             evt = self.pending_approvals.get(project_name)

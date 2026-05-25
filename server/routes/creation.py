@@ -13,6 +13,7 @@ manager = ConnectionManager()
 async def websocket_create(websocket: WebSocket, project_name: str):
     await manager.connect(project_name, websocket)
     orch = AsyncOrchestrator(manager)
+    manager.set_orchestrator(project_name, orch)
 
     try:
         while True:
@@ -20,6 +21,14 @@ async def websocket_create(websocket: WebSocket, project_name: str):
             msg = json.loads(data)
 
             action = msg.get("action", "")
+            if action in ("start", "continue", "redo_phase") and manager.is_running(project_name):
+                # 已有后台任务运行中，不重复启动
+                await manager.send_message(project_name, {
+                    "type": "reconnect_status",
+                    "message": "任务正在后台运行中，请稍候...",
+                })
+                continue
+
             if action == "start":
                 task = asyncio.create_task(
                     orch.run(project_name, msg.get("style", {}))

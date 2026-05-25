@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { Palette, X, Sparkles, Moon, Waves, Sun, Mountain } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { X, Sparkles, Moon, Waves, Sun, Mountain } from 'lucide-react'
 import type { SceneTheme } from './SceneBackground'
 
 interface PaletteOption {
@@ -37,6 +37,13 @@ export default function ThemeSwitcher() {
     try { return JSON.parse(localStorage.getItem(SCENE_KEY) || '"space"') as SceneTheme } catch { return 'space' }
   })
 
+  // 支持从外部通过自定义事件打开（如首页 header 中的快捷按钮）
+  useEffect(() => {
+    const handler = () => setOpen(true)
+    window.addEventListener('openthemeswitcher', handler)
+    return () => window.removeEventListener('openthemeswitcher', handler)
+  }, [])
+
   const setPalette = useCallback((v: string) => {
     setPaletteState(v)
     localStorage.setItem(PALETTE_KEY, JSON.stringify(v))
@@ -53,12 +60,6 @@ export default function ThemeSwitcher() {
 
   return (
     <>
-      <button onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 w-11 h-11 rounded-xl glass-card flex items-center justify-center hover:bg-muted/80 transition-all shadow-lg"
-        title="主题与场景">
-        <Palette className="w-[18px] h-[18px] text-muted-foreground" />
-      </button>
-
       {open && (
         <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
           onClick={() => setOpen(false)} />

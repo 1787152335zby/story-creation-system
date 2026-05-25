@@ -20,6 +20,26 @@ class Storyboarder(AgentBase):
 
     def _build_variant_table(self, visual_chars: list, visual_scenes: list) -> str:
         """从视觉提取数据构建变体参考表，注入分镜 prompt"""
+
+    @staticmethod
+    def _parse_episode_blocks(text: str) -> list:
+        """按集/章标题自动拆分剧本内容，只匹配 H1/H2 级别标题"""
+        import re
+        # 匹配 # 第X集、## 第X集、# 第一幕 等格式
+        # 只匹配 H1/H2，避免误匹配 ### 第X场 等场景标题
+        pattern = re.compile(r'^#{1,2}\s+(第\d+[集章部篇]|第\d+集|第一幕|第二幕|第三幕|第\d+章|第\d+部|第\d+篇).*', re.MULTILINE)
+        matches = list(pattern.finditer(text))
+        blocks = []
+        for i, m in enumerate(matches):
+            label = m.group(1).strip()
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            content = text[start:end].strip()
+            blocks.append({"index": i, "name": label, "content": content})
+        return blocks
+
+    def _build_variant_table(self, visual_chars: list, visual_scenes: list) -> str:
+        """从视觉提取数据构建变体参考表，注入分镜 prompt"""
         lines = ["【角色/场景变体参考表】"]
         lines.append("以下角色和场景有多个形象变体。写分镜时请根据当前事件进度选择正确的变体名。\n")
 
@@ -98,6 +118,16 @@ class Storyboarder(AgentBase):
                    visual_chars: list = None, visual_scenes: list = None):
         template = self.load_prompt_template("storyboarder.txt")
 
+        # 从角色-场景映射表自动加载视觉数据
+        if visual_chars is None or visual_scenes is None:
+            from core.visual_bible import VisualBibleExtractor
+            all_chars = VisualBibleExtractor.list_characters(project)
+            all_scenes = VisualBibleExtractor.list_scenes(project)
+            if visual_chars is None:
+                visual_chars = all_chars
+            if visual_scenes is None:
+                visual_scenes = all_scenes
+
         # Inject variant reference table into prompt
         variant_table = self._build_variant_table(visual_chars or [], visual_scenes or [])
         template = template.replace("{variant_table}", variant_table)
@@ -114,10 +144,22 @@ class Storyboarder(AgentBase):
         style_context = self.get_style_context(style)
 
         plan = ChunkStrategy.get_plan(style.story_type)
-        iterator = ChunkIter(plan, full_plot)
+
+        # 当 chunk_count==0 时，自动按集/章分隔符拆块
+        parsed_blocks = None
+        if plan.chunk_count == 0 or not plan.chunk_names:
+            parsed_blocks = self._parse_episode_blocks(full_plot)
+            if parsed_blocks and len(parsed_blocks) > 1:
+                plan.chunk_count = len(parsed_blocks)
+                plan.chunk_names = [b["name"] for b in parsed_blocks]
 
         if plan.chunk_count > 0 and plan.chunk_names:
             self._plot_texts = []
+            iterator = ChunkIter(plan, full_plot)
+            # _parse_fixed 的 delimiter 缺少捕获组，导致标签和内容错位
+            # 用预解析的 blocks 覆盖
+            if parsed_blocks and len(parsed_blocks) == plan.chunk_count:
+                iterator.blocks = parsed_blocks
 
             for ctx in iterator:
                 yield from self.generate_chunk(ctx, template, style_context, visual_style_name,
@@ -150,9 +192,22 @@ class Storyboarder(AgentBase):
         screen_aspect_name = SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "自适应")
         style_context = self.get_style_context(style)
         plan = ChunkStrategy.get_plan(style.story_type)
-        iterator = ChunkIter(plan, full_plot)
+        parsed_blocks = None
+        if plan.chunk_count == 0 or not plan.chunk_names:
+            parsed_blocks = self._parse_episode_blocks(full_plot)
+            if parsed_blocks and len(parsed_blocks) > 1:
+                plan.chunk_count = len(parsed_blocks)
+                plan.chunk_names = [b["name"] for b in parsed_blocks]
+            elif style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
+                # 用户配置了集数但解析失败时，使用配置值
+                plan.chunk_count = int(style.episode_count)
+                plan.chunk_names = [f"第{i+1}集" for i in range(plan.chunk_count)]
         if plan.chunk_count == 0 or not plan.chunk_names:
             return 0, []
+        iterator = ChunkIter(plan, full_plot)
+        # 用预解析的 blocks 覆盖 _parse_fixed 的错误结果
+        if parsed_blocks and len(parsed_blocks) == plan.chunk_count:
+            iterator.blocks = parsed_blocks
         self._gen_template = template
         self._gen_style_context = style_context
         self._gen_writing_style_name = visual_style_name
@@ -169,7 +224,7 @@ class Storyboarder(AgentBase):
 
     def generate_chunk(self, ctx, template, style_context, writing_style_name,
                        screen_aspect_name, story_type_name, style, plan, outline,
-                       plot_texts=None, feedback="", variant_table=""):
+                       plot_texts=None, feedback="", variant_table="", chunk_name=""):
         self._last_chunk_output = ""
         prompt = template.replace("{style_config}", style_context)
         prompt = prompt.replace("{full_plot}", ctx.outline_section or outline)
@@ -196,7 +251,12 @@ class Storyboarder(AgentBase):
         prompt += prev_full_plot_context
         prompt += prev_storyboard_context
 
-        prompt += f"\n\n请只写「{ctx.name}」的分镜内容。全部内容输出完毕后，请在末尾加上结束标记：**【全片完】**"
+        prompt += f"\n\n请只写「{ctx.name}」的分镜内容，开头务必以 Markdown 标题标明「## {ctx.name}」。全部内容输出完毕后，请在末尾加上结束标记：**【全片完】**"
+
+        if getattr(ctx, 'spatial_state', None):
+            prompt += f"\n\n**上一镜空间状态（必须延续）：**\n{ctx.spatial_state}"
+
+        prompt += f"\n\n当前正在生成：{chunk_name}"
 
         if feedback and ctx.index == (plan.chunk_count or 1) - 1:
             prompt += f"\n\n## 修改意见\n{feedback}"

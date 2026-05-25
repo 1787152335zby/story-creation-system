@@ -54,7 +54,7 @@ export default function AssetGallery({
       <div key={name} className="bg-muted/40 rounded-xl p-3 border border-border/30">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs font-medium truncate flex-1">{name}</span>
-          {imgs.length > 0 && <span className="text-green-400 text-[9px]" title="已确认">✓</span>}
+          {imgs.length > 0 && <span className="text-green-400 text-[10px]" title="已确认">✓</span>}
         </div>
         {imgs.length > 0 && (
           <div className="flex gap-1.5 mb-2">
@@ -68,7 +68,7 @@ export default function AssetGallery({
         {versionKeys.length > 0 && (
           <div className="space-y-1">
             <button onClick={() => setExpandedVersions(prev => ({ ...prev, [key]: !prev[key] }))}
-              className="text-[9px] text-muted-foreground hover:text-primary flex items-center gap-1 px-1 py-0.5 rounded">
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 px-1 py-0.5 rounded">
               {expanded ? '▼' : '▶'} v{versionKeys.join(' v')}
             </button>
             {expanded && versionKeys.map(vk => {
@@ -87,10 +87,10 @@ export default function AssetGallery({
                         className="mr-1 accent-primary"
                       />
                     )}
-                    <span className="text-[9px] text-muted-foreground">v{vk} {v.confirmed && <span className="text-green-400">✓</span>}</span>
+                    <span className="text-[10px] text-muted-foreground">v{vk} {v.confirmed && <span className="text-green-400">✓</span>}</span>
                     {onDeleteVersion && (
                       <button onClick={() => onDeleteVersion(type, name, vk)}
-                        className="text-[8px] text-red-400 hover:text-red-300 px-1 rounded hover:bg-red-500/10">删除</button>
+                        className="text-[10px] text-red-400 hover:text-red-300 px-1 rounded hover:bg-red-500/10">删除</button>
                     )}
                   </div>
                   <div className="flex gap-1 overflow-x-auto">
@@ -102,7 +102,7 @@ export default function AssetGallery({
                   </div>
                   {!v.confirmed && onConfirmVersion && (
                     <button onClick={() => onConfirmVersion(type, name, vk)}
-                      className="mt-1 w-full text-[8px] py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors">确认此版</button>
+                      className="mt-1 w-full text-[10px] py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors">确认此版</button>
                   )}
                 </div>
               )

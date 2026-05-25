@@ -25,7 +25,7 @@ phases:
   - name: 视觉提取
     agent: visual_extractor
     output: 04_角色场景/
-    condition: true
+    condition: "story_type in ['1', '2', '3', '4']"
     auto_skip: false
     split: false
 
@@ -36,9 +36,9 @@ phases:
     auto_skip: false
     split: true
 
-  - name: 提示词生成
-    agent: prompt_factory
-    output: 06_提示词/
+  - name: 生图准备
+    agent: image_preparator
+    output: 06_生图需求/
     condition: "story_type in ['1', '2', '3']"
     auto_skip: false
     split: false

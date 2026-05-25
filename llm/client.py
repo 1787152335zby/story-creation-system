@@ -14,11 +14,17 @@ def _get_active_llm_config() -> dict | None:
         configs = json.loads(path.read_text(encoding="utf-8"))
         for c in configs:
             if c.get("type") == "llm" and c.get("active"):
+                key = c.get("api_key", "")
+                if not key or "your-key" in key or "****" in key:
+                    continue
                 return c
         for c in configs:
             if c.get("type") == "provider" and c.get("active"):
                 pid = c.get("provider_id", "").lower()
                 if pid in ("deepseek", "openai", "claude"):
+                    key = c.get("api_key", "")
+                    if not key or "your-key" in key or "****" in key:
+                        continue
                     return c
     except Exception:
         pass
@@ -34,11 +40,19 @@ PROVIDER_MODEL_MAP = {
 
 class LLMClient:
     def __init__(self):
+        # 优先用 .env 的 LLM_BACKEND（用户最新配置）
+        backend_name = os.getenv("LLM_BACKEND", "openai").lower()
+        env_key_map = {"deepseek": "DEEPSEEK_API_KEY", "openai": "OPENAI_API_KEY", "claude": "CLAUDE_API_KEY"}
+        env_key = os.getenv(env_key_map.get(backend_name, ""), "")
+        if env_key and "your-key" not in env_key and "****" not in env_key:
+            self.backend = self._create_backend(backend_name)
+            return
+        # 没有有效 .env key → 降级到聚合配置
         agg = _get_active_llm_config()
         if agg and agg.get("api_key"):
             self.backend = self._create_from_agg(agg)
         else:
-            backend_name = os.getenv("LLM_BACKEND", "openai").lower()
+            # 兜底：用默认参数创建，等实际调用时再报错
             self.backend = self._create_backend(backend_name)
 
     def _create_from_agg(self, agg: dict) -> LLMBackend:
@@ -55,13 +69,15 @@ class LLMClient:
         return DeepSeekBackend(model, api_key=api_key, base_url=base_url)
 
     def _create_backend(self, name: str) -> LLMBackend:
-        model_map = {
-            "deepseek": ("DEEPSEEK_MODEL", "deepseek-chat"),
-            "openai": ("OPENAI_MODEL", "gpt-4o"),
-            "claude": ("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        env_key_map = {
+            "deepseek": ("DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "deepseek-chat", "https://api.deepseek.com"),
+            "openai": ("OPENAI_API_KEY", "OPENAI_MODEL", "gpt-4o", ""),
+            "claude": ("CLAUDE_API_KEY", "CLAUDE_MODEL", "claude-sonnet-4-20250514", ""),
         }
-        env_key, default_model = model_map.get(name, ("", "gpt-4o"))
-        model = os.getenv(env_key, default_model)
+        key_env, model_env, default_model, default_url = env_key_map.get(name, ("", "", "gpt-4o", ""))
+        model = os.getenv(model_env, default_model)
+        api_key = os.getenv(key_env, "")
+        base_url = os.getenv(f"{name.upper()}_BASE_URL", default_url) or None
 
         backends = {
             "openai": OpenAIBackend,
@@ -72,7 +88,7 @@ class LLMClient:
         if not backend_class:
             available = ", ".join(backends.keys())
             raise ValueError(f"未知后端: {name}，可选: {available}")
-        return backend_class(model)
+        return backend_class(model, api_key=api_key or None, base_url=base_url)
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
         return self.backend.chat(system_prompt, user_prompt, temperature, max_tokens)

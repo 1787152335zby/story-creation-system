@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import logging
 from pathlib import Path
 
 from core.project_manager import ProjectManager
@@ -7,8 +8,31 @@ from core.style_config import StyleConfig, STORY_TYPES
 from core.workflow_loader import WorkflowLoader
 from agents.orchestrator import _split_sort_key
 from core.content_validator import validate_content
+from core.continuity import extract_continuity, save_continuity, load_last_continuity, generate_continuity_injection
+from core.qc_gates import run_qc_check
 
 from .ws_manager import ConnectionManager
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_chunk_heading(chunk_output: str, display_name: str) -> str:
+    """确保分镜/剧本的每集输出以 # 第N集 开头，去除前导散文内容"""
+    import re
+    text = chunk_output.strip()
+    # 在全文中找 # 第N集 标题，找到了就从那里截取
+    episode_match = re.search(r'^(#{1,4}\s*第\d+[集章部篇])', text, re.MULTILINE)
+    if episode_match:
+        return text[episode_match.start():]
+    # 找不到集标题，去除前导散文（直到第一个有效内容标记）
+    for token in ["###", "##", "---", "镜头", "【全片完】"]:
+        idx = text.find(token)
+        if idx >= 0:
+            text = text[idx:]
+            break
+    if not text.startswith("#"):
+        text = f"# {display_name}\n\n{text}"
+    return text
 
 
 class AsyncOrchestrator:
@@ -18,7 +42,7 @@ class AsyncOrchestrator:
         "screenplay_writer": "full_script",
         "storyboarder": "storyboard",
         "visual_extractor": "visual_extract",
-        "prompt_factory": "prompts",
+        "image_preparator": "image_prep",
         "image_artist": "image_gen",
         "video_producer": "video_gen",
     }
@@ -50,6 +74,19 @@ class AsyncOrchestrator:
                 }))
         except Exception:
             pass
+
+    async def _check_qc_and_notify(self, project, project_name, phase_index, agent_name):
+        try:
+            qc_warnings = run_qc_check(agent_name, project.project_dir)
+            if qc_warnings:
+                await self.ws.send_message(project_name, {
+                    "type": "qc_warnings",
+                    "phase": agent_name,
+                    "warnings": qc_warnings,
+                })
+                logger.warning(f"QC警告 [{agent_name}]: {len(qc_warnings)} 条")
+        except Exception as e:
+            logger.error(f"QC检查失败: {e}")
 
     async def run(self, project_name: str, style_data: dict):
         project = ProjectManager(project_name)
@@ -106,7 +143,7 @@ class AsyncOrchestrator:
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": self._get_output_path(phase),
                     })
-                    approval = await self._resume_approval(project, project_name, idx)
+                    approval = await self._resume_approval(project, project_name, idx, style)
                     continue
 
                 pending_ver = project.config.get("pending_version", -1)
@@ -139,7 +176,7 @@ class AsyncOrchestrator:
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": self._get_output_path(phase),
                     })
-                    await self._resume_approval(project, project_name, idx)
+                    await self._resume_approval(project, project_name, idx, style)
                     continue
 
                 pending_ver = project.config.get("pending_version", -1)
@@ -162,7 +199,7 @@ class AsyncOrchestrator:
                             "type": "phase_complete", "phase_index": idx,
                             "phase_name": phase.name, "file_path": output_path_check,
                         })
-                        await self._resume_approval(project, project_name, idx)
+                        await self._resume_approval(project, project_name, idx, style)
                         continue
 
                 if is_outline:
@@ -187,6 +224,7 @@ class AsyncOrchestrator:
 
                     # 重新生成完整大纲的输入
                     second_input = f"\n\n## 用户选择\n请生成版本{version_letter}的完整大纲。" + (f"\n\n## 修改意见\n{fb}" if fb else "")
+                    base_revise_input = second_input
 
                     await self.ws.send_message(project_name, {
                         "type": "phase_start", "phase_index": idx,
@@ -208,17 +246,18 @@ class AsyncOrchestrator:
                             break
                         elif cr.get("action") == "paused":
                             await self.ws.send_message(project_name, {
-                                "type": "phase_complete", "phase_index": idx,
-                                "phase_name": phase.name, "file_path": output_path,
+                                "type": "phase_paused",
+                                "phase_index": idx,
+                                "phase_name": phase.name,
                             })
-                            await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                             paused_phase = True
-                            continue
+                            break
                     else:
                         full_output = await self._run_agent_in_thread(agent, project, style, second_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
 
+                    await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": output_path,
@@ -244,7 +283,7 @@ class AsyncOrchestrator:
                         if not feedback:
                             project.clear_pending_approval()
                             break
-                        revised_input = input_content + "\n\n## 修改意见\n" + feedback
+                        revised_input = second_input + "\n\n## 修改意见\n" + feedback
                         full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
@@ -276,17 +315,18 @@ class AsyncOrchestrator:
                             break
                         elif cr.get("action") == "paused":
                             await self.ws.send_message(project_name, {
-                                "type": "phase_complete", "phase_index": idx,
-                                "phase_name": phase.name, "file_path": output_path,
+                                "type": "phase_paused",
+                                "phase_index": idx,
+                                "phase_name": phase.name,
                             })
-                            await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                             paused_phase = True
-                            continue
+                            break
                     else:
                         full_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
 
+                    await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": output_path,
@@ -309,7 +349,6 @@ class AsyncOrchestrator:
             await self.ws.send_message(project_name, {
                 "type": "error",
                 "message": f"生成中断: {str(e)}",
-                "phase_index": phase_index,
             })
 
     async def continue_run(self, project_name: str, style_data: dict):
@@ -365,7 +404,7 @@ class AsyncOrchestrator:
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": output_path,
                     })
-                    await self._resume_approval(project, project_name, idx)
+                    await self._resume_approval(project, project_name, idx, style)
                     continue
 
                 pending_ver = project.config.get("pending_version", -1)
@@ -381,21 +420,69 @@ class AsyncOrchestrator:
                 existing_full_parts = None
                 if pending_ep and pending_ep.get("phase_index") == idx:
                     resumed = await self._resume_chunked_approval(project, project_name, idx, pending_ep)
+                    if resumed == "_paused":
+                        paused_phase = True
+                        break
                     if resumed:
                         continue
-                    # file doesn't exist (paused-then-continue), fall through to normal flow
-                    chunk_resume_ci = pending_ep["chunk_index"]
-                    # 读取已生成的 chunk 文件构建 existing_full_parts
-                    chunk_files = pending_ep.get("chunk_files", [])
-                    parts = []
-                    for cf in chunk_files:
-                        content = project.read_output(cf) or ""
-                        if content:
-                            parts.append(content)
-                    if parts:
-                        existing_full_parts = parts
+                    # 文件不存在 → 要么是初始回入（用户退首页再回来），要么是点了继续生成
+                    auto_resume = project.config.pop("_proceed_resume", False)
+                    project.save_config()
+                    if auto_resume:
+                        # 用户点了"继续生成下一集" → 降级到正常生成流程
+                        chunk_resume_ci = pending_ep["chunk_index"]
+                        chunk_files = pending_ep.get("chunk_files", [])
+                        parts = []
+                        for cf in chunk_files:
+                            content = project.read_output(cf) or ""
+                            if content:
+                                parts.append(content)
+                        if parts:
+                            existing_full_parts = parts
+                    else:
+                        # 初始回入 → 先重放已有集的内容，再显示暂停状态
+                        chunk_files = pending_ep.get("chunk_files", [])
+                        base_stem = Path(output_path).stem
+                        parent_dir = str(Path(output_path).parent)
+                        for i, cf in enumerate(chunk_files):
+                            # 如果是相对路径，拼上 parent
+                            full_cf = cf if parent_dir == "." or cf.startswith(parent_dir) or '/' in cf else f"{parent_dir}/{cf}"
+                            content = project.read_output(full_cf) or ""
+                            if content:
+                                await self.ws.send_message(project_name, {
+                                    "type": "chunk_saved",
+                                    "phase_index": idx,
+                                    "chunk_name": f"第{i+1}集",
+                                    "chunk_index": i,
+                                    "total_chunks": pending_ep.get("total_chunks", 0),
+                                    "file_path": full_cf,
+                                })
+                        # 重放最后一集的内容作为当前显示
+                        if chunk_files:
+                            last_cf = chunk_files[-1] if parent_dir == "." or chunk_files[-1].startswith(parent_dir) or '/' in chunk_files[-1] else f"{parent_dir}/{chunk_files[-1]}"
+                            last_content = project.read_output(last_cf) or ""
+                            if last_content:
+                                await self.ws.send_message(project_name, {"type": "stream_clear"})
+                                await self.ws.send_message(project_name, {
+                                    "type": "stream", "phase_index": idx,
+                                    "chunk": last_content,
+                                })
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_paused",
+                            "phase_index": idx,
+                            "phase_name": phase.name,
+                        })
+                        paused_phase = True
+                        break
                 # 对于大纲阶段，即使有现有内容也不跳过，因为我们需要重新走两阶段流程
                 if not is_outline:
+                    # 如果后面还有 pending_episode，当前阶段有内容就直接标记完成，不弹审核
+                    pending_ep_later = project.pending_episode
+                    if pending_ep_later and isinstance(pending_ep_later, dict) and pending_ep_later.get("phase_index", -1) > idx:
+                        existing_content = project.read_output(output_path) or ""
+                        if existing_content.strip():
+                            project.mark_phase_done(idx)
+                            continue
                     existing_content = project.read_output(output_path) or ""
                     if existing_content.strip():
                         await self.ws.send_message(project_name, {
@@ -406,7 +493,7 @@ class AsyncOrchestrator:
                             "type": "phase_complete", "phase_index": idx,
                             "phase_name": phase.name, "file_path": output_path,
                         })
-                        await self._resume_approval(project, project_name, idx)
+                        await self._resume_approval(project, project_name, idx, style)
                         continue
 
                 await self.ws.send_message(project_name, {
@@ -475,17 +562,18 @@ class AsyncOrchestrator:
                             break
                         elif cr.get("action") == "paused":
                             await self.ws.send_message(project_name, {
-                                "type": "phase_complete", "phase_index": idx,
-                                "phase_name": phase.name, "file_path": output_path,
+                                "type": "phase_paused",
+                                "phase_index": idx,
+                                "phase_name": phase.name,
                             })
-                            await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                             paused_phase = True
-                            continue
+                            break
                     else:
                         full_output = await self._run_agent_in_thread(agent, project, style, second_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
 
+                    await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": output_path,
@@ -511,10 +599,15 @@ class AsyncOrchestrator:
                         if not feedback:
                             project.clear_pending_approval()
                             break
-                        revised_input = input_content + "\n\n## 修改意见\n" + feedback
+                        revised_input = second_input + "\n\n## 修改意见\n" + feedback
                         full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
+                        await self._check_qc_and_notify(project, project_name, idx, phase.agent)
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_complete", "phase_index": idx,
+                            "phase_name": phase.name, "file_path": output_path,
+                        })
                         approval = await self.ws.wait_for_approval(project_name, idx)
                         iterations += 1
 
@@ -541,17 +634,18 @@ class AsyncOrchestrator:
                             break
                         elif cr.get("action") == "paused":
                             await self.ws.send_message(project_name, {
-                                "type": "phase_complete", "phase_index": idx,
-                                "phase_name": phase.name, "file_path": output_path,
+                                "type": "phase_paused",
+                                "phase_index": idx,
+                                "phase_name": phase.name,
                             })
-                            await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                             paused_phase = True
-                            continue
+                            break
                     else:
                         full_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
 
+                    await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
                         "type": "phase_complete", "phase_index": idx,
                         "phase_name": phase.name, "file_path": output_path,
@@ -571,6 +665,7 @@ class AsyncOrchestrator:
                         full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
+                        await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                         await self.ws.send_message(project_name, {
                             "type": "phase_complete", "phase_index": idx,
                             "phase_name": phase.name, "file_path": output_path,
@@ -642,6 +737,28 @@ class AsyncOrchestrator:
                 for i in range(start_pidx, len(config_phases)):
                     config_phases[i]["done"] = False
                 project.save_config()
+                # 清理当前阶段及下游阶段的输出文件
+                for i in range(start_pidx, len(config_phases)):
+                    for p in phases:
+                        p_config_name = self.AGENT_TO_CONFIG.get(p.agent, p.agent)
+                        if p_config_name == config_phases[i]["name"]:
+                            out_path = self._get_output_path(p)
+                            project.delete_output(out_path)
+                            # 清理分集文件：删除 output 目录下所有 base_stem_*.md
+                            parent_dir = project.project_dir / str(Path(out_path).parent)
+                            base_stem = Path(out_path).stem
+                            if parent_dir.exists():
+                                for f in parent_dir.glob(f"{base_stem}_*.md"):
+                                    f.unlink()
+                                for subdir in parent_dir.iterdir():
+                                    if subdir.is_dir():
+                                        for f in subdir.glob(f"{base_stem}.md"):
+                                            f.unlink()
+                                        try:
+                                            subdir.rmdir()
+                                        except OSError:
+                                            pass
+                            break
 
             if is_outline:
                 # 方向卡生成，不发送 phase_complete
@@ -681,6 +798,7 @@ class AsyncOrchestrator:
                     full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
                     project.write_output(output_path, full_output)
 
+                await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
                 await self.ws.send_message(project_name, {
                     "type": "phase_complete", "phase_index": phase_index,
                     "phase_name": phase.name, "file_path": output_path,
@@ -706,7 +824,7 @@ class AsyncOrchestrator:
                     if not feedback:
                         project.clear_pending_approval()
                         break
-                    revised_input = input_content + "\n\n## 修改意见\n" + feedback
+                    revised_input = second_input + "\n\n## 修改意见\n" + feedback
                     full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, phase_index)
                     full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
                     project.write_output(output_path, full_output)
@@ -723,7 +841,7 @@ class AsyncOrchestrator:
                 # 非大纲阶段，正常处理
                 if phase.split:
                     cr = await self._run_chunked_generation(
-                        type(agent), project, style, feedback_input,
+                        type(agent), project, style, input_content,
                         project_name, output_path, phase_index
                     )
                     if cr.get("confirmed"):
@@ -739,10 +857,11 @@ class AsyncOrchestrator:
                         await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": phase_index})
                         return
                 else:
-                    full_output = await self._run_agent_in_thread(agent, project, style, feedback_input, project_name, phase_index)
+                    full_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, phase_index)
                     full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
                     project.write_output(output_path, full_output)
 
+                await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
                 await self.ws.send_message(project_name, {
                     "type": "phase_complete", "phase_index": phase_index,
                     "phase_name": phase.name, "file_path": output_path,
@@ -795,6 +914,9 @@ class AsyncOrchestrator:
         return style
 
     async def _wait_for_version(self, project_name: str) -> dict:
+        # 自动审核模式下，自动选版本 A
+        if self.ws.auto_approve_flags.get(project_name, False):
+            return {"version": "1", "feedback": "", "auto": True}
         await self.ws.send_message(project_name, {
             "type": "awaiting_version",
             "phase_index": 0,
@@ -840,8 +962,9 @@ class AsyncOrchestrator:
                 "01_故事大纲/": "故事大纲.md",
                 "02_完整剧情/": "完整剧情.md",
                 "03_完整剧本/": "完整剧本.md",
-                "04_分镜脚本/": "分镜脚本.md",
-                "05_提示词/": "提示词.md",
+                "04_角色场景/": "角色场景.md",
+                "05_分镜脚本/": "分镜脚本.md",
+                "06_生图需求/": "分析报告.md",
             }
             return output + filename_map.get(output, "产出.md")
         return output
@@ -921,7 +1044,7 @@ class AsyncOrchestrator:
 
         return full_output
 
-    async def _resume_approval(self, project, project_name, phase_index):
+    async def _resume_approval(self, project, project_name, phase_index, style=None):
         project.set_pending_approval(phase_index)
         approval = await self.ws.wait_for_approval(project_name, phase_index)
         iterations = 0
@@ -943,12 +1066,17 @@ class AsyncOrchestrator:
             agent_class = getattr(module, class_name)
             agent = agent_class()
             output_content = project.read_output(self._get_output_path(phase)) or ""
-            revised_input = output_content + "\n\n## 修改意见\n" + feedback
-            from core.style_config import StyleConfig
-            style = StyleConfig()
+            if phase.agent == "outline_designer":
+                revised_input = "## 用户选择\n请生成版本A的完整大纲。\n\n## 修改意见\n" + feedback
+            else:
+                revised_input = output_content + "\n\n## 修改意见\n" + feedback
+            if style is None:
+                from core.style_config import StyleConfig
+                style = StyleConfig()
             revised_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, phase_index)
             revised_output = self._reorder_chunked_stream(agent, revised_output, project_name, phase_index)
             project.write_output(self._get_output_path(phase), revised_output)
+            await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
             await self.ws.send_message(project_name, {
                 "type": "phase_complete", "phase_index": phase_index,
                 "phase_name": phase.name, "file_path": self._get_output_path(phase),
@@ -1001,6 +1129,7 @@ class AsyncOrchestrator:
                 full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
                 project.write_output(output_path, full_output)
                 project.mark_phase_done(phase_index)
+                await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
                 await self.ws.send_message(project_name, {
                     "type": "phase_complete", "phase_index": phase_index,
                     "phase_name": phase.name, "file_path": output_path,
@@ -1009,6 +1138,7 @@ class AsyncOrchestrator:
 
     def _save_split_output(self, project, output_path, content):
         content = self._fix_character_format(content)
+        content = self._wrap_long_text(content)
         project.write_output(output_path, content)
         from tools.content_splitter import split_by_headings, make_split_filename
         split_parts = split_by_headings(content)
@@ -1040,6 +1170,48 @@ class AsyncOrchestrator:
                 result.append(line)
         return '\n'.join(result)
 
+    @staticmethod
+    def _wrap_long_text(content: str, max_chars: int = 80) -> str:
+        """对叙事文本做自动换行：在中句号/感叹号/问号/分号/省略号后分行"""
+        import re
+        lines = content.split('\n')
+        result = []
+        for line in lines:
+            stripped = line.rstrip()
+            # 跳过镜头头标行、转场行、角色/场景行、空行、代码块
+            if (stripped.startswith('镜头') or
+                stripped.startswith('淡入') or
+                stripped.startswith('淡出') or
+                stripped.startswith('硬切') or
+                stripped.startswith('溶镜') or
+                stripped.startswith('猛切') or
+                stripped.startswith('出场角色') or
+                stripped.startswith('场景') or
+                stripped.startswith('---') or
+                stripped.startswith('```') or
+                stripped.startswith('|') or
+                not stripped):
+                result.append(line)
+                continue
+            # 只对纯叙事文本（长于 max_chars 的行）换行
+            if len(stripped) > max_chars and not stripped.startswith('#'):
+                # 在句末标点后换行，保留标点
+                wrapped = re.sub(
+                    r'([。！？；…])(?![」』）】\n])',
+                    r'\1\n',
+                    stripped
+                )
+                # 如果换行后的行还是太长，在逗号后也折一下
+                final_lines = []
+                for wl in wrapped.split('\n'):
+                    if len(wl) > max_chars + 20:
+                        wl = re.sub(r'([，、；：])', r'\1\n', wl)
+                    final_lines.append(wl)
+                result.append('\n'.join(final_lines))
+            else:
+                result.append(line)
+        return '\n'.join(result)
+
     async def _run_chunked_generation(self, agent_class, project, style, input_content, project_name, output_path, phase_index,
                                       start_ci=0, existing_full_parts=None):
         """逐集生成+审核：每集生成完->保存->审核->通过后才生成下一集
@@ -1049,6 +1221,10 @@ class AsyncOrchestrator:
         agent = agent_class()
         chunk_count, chunk_names = agent.prepare_generation(project, style, input_content)
         if chunk_count <= 0:
+            # 不分集模式（如短剧），退回全量生成
+            full_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, phase_index)
+            full_output = self._reorder_chunked_stream(agent, full_output, project_name, phase_index)
+            project.write_output(output_path, full_output)
             return {"action": "approve"}
 
         iterator = agent._gen_iterator
@@ -1106,8 +1282,16 @@ class AsyncOrchestrator:
             cancelled = [False]
 
             kwargs = _build_gen_kwargs(agent, ctx)
+            kwargs["chunk_name"] = display_name
             if current_feedback:
                 kwargs["feedback"] = current_feedback
+
+            prev_continuity = load_last_continuity(project.project_dir)
+            if prev_continuity:
+                injection = generate_continuity_injection(prev_continuity, None)
+                if injection:
+                    kwargs["template"] = kwargs["template"] + "\n\n## 前情提要（上一集状态追踪）\n\n" + injection
+                    logger.info(f"ContinuityLog 已注入前情提要到 {display_name}")
 
             def _run():
                 try:
@@ -1152,14 +1336,23 @@ class AsyncOrchestrator:
 
             # 保存当前集文件
             chunk_output = self._fix_character_format(chunk_output)
-            chunk_fname = f"{base_stem}_{display_name}.md"
-            if parent and parent != ".":
-                chunk_fname = f"{parent}/{chunk_fname}"
+            chunk_output = self._wrap_long_text(chunk_output)
+            chunk_output = _normalize_chunk_heading(chunk_output, display_name)
+            ep_dir_rel = Path(output_path).parent / display_name
+            ep_dir_rel_str = ep_dir_rel.as_posix()
+            chunk_fname = f"{ep_dir_rel_str}/{base_stem}.md"
             project.write_output(chunk_fname, chunk_output)
             full_parts.append(chunk_output)
             iterator.set_output(chunk_index, chunk_output)
             if hasattr(agent, '_last_chunk_output'):
                 agent._last_chunk_output = chunk_output
+
+            try:
+                log = extract_continuity(chunk_output, None)
+                save_continuity(project.project_dir, display_name, log)
+                logger.info(f"ContinuityLog 已提取: {display_name}")
+            except Exception as e:
+                logger.warning(f"ContinuityLog 提取失败 ({display_name}): {e}")
 
             # 持久化逐集审核状态（刷新后可恢复）
             project.set_pending_episode(phase_index, ci, display_name, chunk_count, chunk_files=[chunk_fname])
@@ -1181,11 +1374,9 @@ class AsyncOrchestrator:
             if action == "approve":
                 ci += 1
                 current_feedback = ""
-                # 已通过，清除持久化状态（下次 wa 由下一集的 set_pending_episode 负责）
-                project.clear_pending_episode()
             elif action == "confirm":
                 project.clear_pending_episode()
-                if ci < total_chunks - 1:
+                if ci < chunk_count - 1:
                     # 还有剩余集 → 暂停，不结束阶段
                     # 构建已生成的 chunk 文件名列表（用于恢复时重建 existing_full_parts）
                     saved_chunk_files = []
@@ -1193,9 +1384,8 @@ class AsyncOrchestrator:
                         cidx = indices[i]
                         ctxi = iterator.get_chunk_context(cidx)
                         name = ctxi.name if ctxi.name else f"第{i+1}集"
-                        cfname = f"{base_stem}_{name}.md"
-                        if parent and parent != ".":
-                            cfname = f"{parent}/{cfname}"
+                        ep_dir_r = Path(output_path).parent / name
+                        cfname = f"{ep_dir_r.as_posix()}/{base_stem}.md"
                         saved_chunk_files.append(cfname)
                     project.set_pending_episode(phase_index, ci + 1, f"第{ci+2}集", chunk_count, chunk_files=saved_chunk_files)
                     return {"action": "paused"}
@@ -1214,6 +1404,7 @@ class AsyncOrchestrator:
         # 所有块通过后写入合并文件
         if full_parts:
             project.write_output(output_path, "\n\n---\n\n".join(full_parts))
+        project.clear_pending_episode()
         return {"action": "confirm" if action == "confirm" else "approve", "confirmed": action == "confirm"}
 
     async def _resume_chunked_approval(self, project, project_name, phase_index, pending_ep):
@@ -1232,9 +1423,8 @@ class AsyncOrchestrator:
         base_stem = Path(output_path).stem
         parent = str(Path(output_path).parent)
 
-        chunk_fname = f"{base_stem}_{chunk_name}.md"
-        if parent and parent != ".":
-            chunk_fname = f"{parent}/{chunk_fname}"
+        chunk_fname_rel = Path(output_path).parent / chunk_name / (base_stem + ".md")
+        chunk_fname = chunk_fname_rel.as_posix()
         content = project.read_output(chunk_fname) or ""
         if not content.strip():
             # 文件不存在 → 这是暂停后继续生成的场景，走正常生成流程
@@ -1272,7 +1462,17 @@ class AsyncOrchestrator:
         action = ep_result.get("action", "approve")
         if action == "confirm":
             project.clear_pending_episode()
+            if chunk_index < total_chunks - 1:
+                saved_chunk_files = pending_ep.get("chunk_files", [])
+                project.set_pending_episode(phase_index, chunk_index + 1, f"第{chunk_index + 2}集", total_chunks, chunk_files=saved_chunk_files)
+                await self.ws.send_message(project_name, {
+                    "type": "phase_paused",
+                    "phase_index": phase_index,
+                    "phase_name": phases[phase_index].name if phase_index < len(phases) else "",
+                })
+                return "_paused"
             project.mark_phase_done(phase_index)
+            await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
             await self.ws.send_message(project_name, {"type": "phase_complete", "phase_index": phase_index})
             await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": phase_index})
         elif action == "revise":
@@ -1284,16 +1484,19 @@ class AsyncOrchestrator:
             else:
                 project.clear_pending_episode()
                 project.mark_phase_done(phase_index)
+                await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
                 await self.ws.send_message(project_name, {"type": "phase_complete", "phase_index": phase_index})
                 await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": phase_index})
         else:
-            # approve: 还有更多集，重新进入完整逐集生成流
             project.clear_pending_episode()
             next_ci = chunk_index + 1
             if next_ci >= total_chunks:
                 project.mark_phase_done(phase_index)
+                await self._check_qc_and_notify(project, project_name, phase_index, phase.agent)
                 await self.ws.send_message(project_name, {"type": "phase_complete", "phase_index": phase_index})
                 await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": phase_index})
+                return True
+            return False
         return True
 
     def _reorder_chunked_stream(self, agent, full_output: str, project_name: str, phase_index: int) -> str:
@@ -1322,13 +1525,15 @@ class AsyncOrchestrator:
             "plot_expander": "01_故事大纲/故事大纲.md",
             "screenplay_writer": "02_完整剧情/完整剧情.md",
             "storyboarder": "03_完整剧本/完整剧本.md",
-            "prompt_engineer": "04_分镜脚本/分镜脚本.md",
+            "image_preparator": "05_分镜脚本/分镜脚本.md",
         }
         source = input_map.get(phase.agent)
         if source:
             dir_path = project.project_dir / Path(source).parent
             base_name = Path(source).stem
-            split_files = sorted(dir_path.glob(f"{base_name}_*.md"), key=lambda f: _split_sort_key(f.name))
+            split_files = sorted(dir_path.glob(f"*/{base_name}.md"), key=lambda f: _split_sort_key(str(f)))
+            if not split_files:
+                split_files = sorted(dir_path.glob(f"{base_name}_*.md"), key=lambda f: _split_sort_key(f.name))
             if not split_files:
                 split_files = sorted(dir_path.glob("*_[0-9][0-9]_*.md"), key=lambda f: _split_sort_key(f.name))
             if split_files:

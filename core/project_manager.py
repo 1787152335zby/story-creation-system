@@ -39,7 +39,16 @@ class ProjectManager:
     def _load_or_create_config(self) -> Dict:
         if self.config_file.exists():
             with open(self.config_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                config = json.load(f)
+            # 迁移：旧项目 storyboard/visual_extract 顺序与 workflow 不一致
+            phases = config.get("phases", [])
+            if len(phases) >= 5 and phases[3].get("name") == "storyboard" and phases[4].get("name") == "visual_extract":
+                phases[3], phases[4] = phases[4], phases[3]
+                config["updated_at"] = datetime.now().isoformat()
+                self.config_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.config_file, "w", encoding="utf-8") as fw:
+                    json.dump(config, fw, ensure_ascii=False, indent=2)
+            return config
         return {
             "name": self.name,
             "created_at": datetime.now().isoformat(),
@@ -50,8 +59,8 @@ class ProjectManager:
                 {"name": "story_outline", "done": False},
                 {"name": "full_plot", "done": False},
                 {"name": "full_script", "done": False},
-                {"name": "storyboard", "done": False},
                 {"name": "visual_extract", "done": False},
+                {"name": "storyboard", "done": False},
                 {"name": "prompts", "done": False},
                 {"name": "image_gen", "done": False},
                 {"name": "video_gen", "done": False},
@@ -123,6 +132,13 @@ class ProjectManager:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
         return file_path
+
+    def delete_output(self, filename: str) -> bool:
+        file_path = self.project_dir / filename
+        if file_path.exists():
+            file_path.unlink()
+            return True
+        return False
 
     def read_output(self, filename: str) -> Optional[str]:
         file_path = self.project_dir / filename

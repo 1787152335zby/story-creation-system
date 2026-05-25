@@ -9,11 +9,13 @@ import ProjectAssetPicker from '../components/ProjectAssetPicker'
 
 import type { ProjectInfo, EntityImage, EntityImagesMap } from '../lib/types'
 import { useToast } from '../components/Toast'
+import Starfield from '../components/Starfield'
 
 export default function VideoGenPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const freePromptRef = useRef<HTMLTextAreaElement>(null)
   const [mode, setMode] = useState<'free' | 'project'>('free')
 
   // Free mode
@@ -47,7 +49,21 @@ export default function VideoGenPage() {
   const [log, setLog] = useState<string[]>([])
 
   useEffect(() => {
-    fetchProjects().then(setProjects)
+    if (freePromptRef.current) {
+      freePromptRef.current.style.height = 'auto'
+      freePromptRef.current.style.height = freePromptRef.current.scrollHeight + 'px'
+    }
+  }, [freePrompt])
+
+  useEffect(() => {
+    fetchProjects().then(list => {
+      setProjects(list)
+      const savedProject = localStorage.getItem('lastProject')
+      if (savedProject && list.some(p => p.name === savedProject)) {
+        setSelectedProject(savedProject)
+        setMode('project')
+      }
+    })
     fetchProjects().then(setRefProjects)
     fetchGenerationHistory().then(h => setHistoryVideos(h.videos))
     fetchActiveConfig('video').then(cfg => {
@@ -132,24 +148,6 @@ export default function VideoGenPage() {
     setFreeGenerating(false)
   }
 
-  const handleProjectGen = () => {
-    if (!selectedProject) return
-    setGenerating('all')
-    setLog([])
-    const addLog = (msg: string) => setLog(prev => [...prev, msg])
-    addLog('🚀 开始生成视频...')
-    const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws/create/${encodeURIComponent(selectedProject)}`)
-    ws.onopen = () => ws.send(JSON.stringify({ action: 'redo_phase', phase_index: 7, style: {} }))
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data)
-      if (msg.type === 'stream' && msg.chunk) addLog(msg.chunk)
-      if (msg.type === 'phase_complete') addLog('✅ 完成')
-      if (msg.type === 'error') addLog(`❌ ${msg.message || '失败'}`)
-      if (msg.type === 'all_complete' || msg.type === 'phase_complete') { refreshClips(); setGenerating(null) }
-    }
-    ws.onerror = () => { addLog('❌ 连接失败'); setGenerating(null) }
-  }
-
   const handleDragStart = (i: number) => setDragIndex(i)
   const handleDragOver = (e: React.DragEvent, i: number) => {
     e.preventDefault()
@@ -164,50 +162,55 @@ export default function VideoGenPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, hsl(var(--primary)), transparent 70%)' }} />
-      </div>
+      <Starfield />
 
       <div className="max-w-5xl mx-auto px-6 py-10 relative z-10">
-        <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground mb-8 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> 返回首页
+        <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 mb-8 transition-all text-xs">
+          <ArrowLeft className="w-3.5 h-3.5" /> 返回首页
         </button>
 
-        <h1 className="text-2xl font-bold mb-2"><span className="gradient-text">🎬 视频生成</span></h1>
-        <p className="text-sm text-muted-foreground mb-6">图生视频 · 多图片参考 · 自由创作</p>
+        <h1 className="text-[clamp(28px,5vw,42px)] font-black tracking-[-0.04em] leading-none mb-2"
+          style={{
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 100%)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>
+          🎬 视频生成
+        </h1>
+        <p className="text-xs text-white/15 tracking-wider mb-6">图生视频 · 多图片参考 · 自由创作</p>
 
         {/* Mode tabs */}
-        <div className="flex gap-2 mb-8">
-          <button onClick={() => setMode('free')} className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${mode === 'free' ? 'bg-primary/20 text-primary border-2 border-primary/50' : 'border-2 border-border text-muted-foreground hover:border-primary/30'}`}>
+        <div className="flex gap-2 mb-6">
+          <button onClick={() => setMode('free')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
+            style={mode === 'free' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
             ✏️ 自由创作
           </button>
-          <button onClick={() => setMode('project')} className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${mode === 'project' ? 'bg-primary/20 text-primary border-2 border-primary/50' : 'border-2 border-border text-muted-foreground hover:border-primary/30'}`}>
+          <button onClick={() => setMode('project')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
+            style={mode === 'project' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
             📂 项目模式
           </button>
         </div>
 
         {mode === 'free' ? (
           <>
-            <div className="glass-card rounded-2xl p-6 mb-6">
+            <div className="rounded-2xl p-6 mb-6 glass-surface-visible border border-white/[0.08] glow-border">
               {/* Reference images */}
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">参考图片（可上传多张）</label>
-              <div className="border-2 border-dashed border-border rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 transition-colors mb-4"
+              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-2 block">参考图片（可上传多张）</label>
+              <div className="border-2 border-dashed border-white/[0.10] rounded-xl p-6 text-center cursor-pointer hover:border-[rgba(129,140,248,0.3)] transition-colors mb-4"
                 onClick={() => fileInputRef.current?.click()}>
-                <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">点击上传参考图片（支持多选）</p>
+                <Upload className="w-8 h-8 mx-auto mb-2 text-white/55" />
+                <p className="text-sm text-white/55">点击上传参考图片（支持多选）</p>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
               </div>
 
               {freeFiles.length > 0 && (
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3 mb-4">
                   {freeFiles.map((entry, i) => (
-                    <div key={i} className={`relative group ${dragIndex === i ? 'opacity-50 ring-2 ring-primary' : ''}`}
+                    <div key={i} className={`relative group ${dragIndex === i ? 'opacity-50 ring-2 ring-[rgba(129,140,248,0.7)]' : ''}`}
                       draggable={true}
                       onDragStart={() => handleDragStart(i)}
                       onDragOver={(e) => handleDragOver(e, i)}
                       onDragEnd={handleDragEnd}>
-                      <img src={entry.preview} alt="" className="w-full h-28 object-cover rounded-xl" />
+                      <img src={entry.preview} alt="" className="w-full h-28 object-cover rounded-xl img-hover" />
                       <button onClick={() => removeFile(i)}
                         className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
                         <X className="w-3.5 h-3.5" />
@@ -235,32 +238,32 @@ export default function VideoGenPage() {
               />
 
               {/* Prompt */}
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">动作描述</label>
-              <textarea value={freePrompt} onChange={e => setFreePrompt(e.target.value)}
-                placeholder="例如：角色缓缓转身，风吹动衣角，背景的云层在流动..." className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-24 resize-none text-sm mb-4" />
+              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-2 block">动作描述</label>
+              <textarea ref={freePromptRef} value={freePrompt} onChange={e => setFreePrompt(e.target.value)}
+                placeholder="例如：角色缓缓转身，风吹动衣角，背景的云层在流动..." className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-4 py-3 min-h-[6rem] resize-none text-sm mb-4 input-field" />
 
               {/* Resolution + Model + Duration */}
               <div className="grid grid-cols-4 gap-4 mb-4">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">模型</label>
+                  <label className="text-xs text-white/55 block mb-1">模型</label>
                   <ModelSelector type="video" value={videoModel} onChange={setVideoModel} />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">比例</label>
+                  <label className="text-xs text-white/55 block mb-1">比例</label>
                   <select value={selectedRatio} onChange={e => { const rs = ratioGroups[e.target.value]; setSelectedRatio(e.target.value); if (rs?.length) setFreeResolution(rs[0]) }}
-                    className="w-full bg-muted border border-border rounded-xl px-3 py-2.5 text-sm">
+                    className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
                     {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">分辨率</label>
-                  <select value={freeResolution} onChange={e => setFreeResolution(e.target.value)} className="w-full bg-muted border border-border rounded-xl px-3 py-2.5 text-sm">
+                  <label className="text-xs text-white/55 block mb-1">分辨率</label>
+                  <select value={freeResolution} onChange={e => setFreeResolution(e.target.value)} className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
                     {(ratioGroups[selectedRatio] || resolutions).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">时长</label>
-                  <select className="w-full bg-muted border border-border rounded-xl px-3 py-2.5 text-sm">
+                  <label className="text-xs text-white/55 block mb-1">时长</label>
+                  <select className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
                     <option value="5">5 秒</option>
                     <option value="10">10 秒</option>
                     <option value="15">15 秒</option>
@@ -274,33 +277,33 @@ export default function VideoGenPage() {
               <div className="flex items-center gap-3 mb-4">
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" className="sr-only peer" checked={generateAudio} onChange={e => setGenerateAudio(e.target.checked)} />
-                  <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  <div className="w-9 h-5 bg-white/[0.04] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[rgba(129,140,248,0.7)]"></div>
                 </label>
-                <span className="text-xs text-muted-foreground">生成音频（对白+音效）</span>
+                <span className="text-xs text-white/55">生成音频（对白+音效）</span>
               </div>
 
               <button onClick={handleFreeGen} disabled={freeGenerating || !freePrompt.trim()}
-                className="btn-gradient flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, hsl(350, 80%, 60%), hsl(330, 80%, 50%))' }}>
+                className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-50 opt-btn"
+                style={{ background: 'linear-gradient(135deg, rgba(129,140,248,0.22), rgba(167,139,250,0.2))', color: 'rgba(129,140,248,0.98)', border: '1px solid rgba(129,140,248,0.35)', boxShadow: '0 20px 40px -16px rgba(129,140,248,0.35)' }}>
                 {freeGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 {freeGenerating ? `等待中 ${freeElapsed}s` : '生成视频'}
               </button>
             </div>
 
             {freeResult && (
-              <div className="glass-card rounded-2xl p-5">
+              <div className="rounded-2xl p-5 card-glow glass-card">
                 <h3 className="font-semibold text-sm mb-3">生成结果</h3>
                 {freeResult.error ? (
-                  <div className="p-4 bg-red-500/10 rounded-xl">
+                  <div className="p-4 bg-red-500/10 rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
                     <p className="text-red-400 text-sm">❌ {freeResult.error}</p>
-                    {freeResult.task_id && <p className="text-xs text-muted-foreground mt-1">任务ID: {freeResult.task_id}</p>}
+                    {freeResult.task_id && <p className="text-xs text-white/55 mt-1">任务ID: {freeResult.task_id}</p>}
                   </div>
                 ) : (
                   <div>
                     <video src={freeResult.local ? `/generated/${freeResult.local.split('\\').pop() || freeResult.local.split('/').pop()}` : freeResult.video_url}
                       controls className="w-full max-w-2xl rounded-xl" style={{ maxHeight: '450px' }} />
                     <div className="flex gap-2 mt-3">
-                      <a href={freeResult.video_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
+                      <a href={freeResult.video_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-white/[0.10] text-xs hover:bg-white/[0.04] transition-colors opt-btn">
                         <Download className="w-3.5 h-3.5" /> 下载原视频
                       </a>
                     </div>
@@ -310,11 +313,11 @@ export default function VideoGenPage() {
             )}
 
             {historyVideos.length > 0 && !freeResult && (
-              <div className="glass-card rounded-2xl p-5 opacity-70">
+              <div className="rounded-2xl p-5 card-glow glass-card">
                 <h3 className="font-semibold text-sm mb-4">📂 历史记录</h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {historyVideos.map((v, i) => (
-                    <div key={i} className="bg-muted rounded-xl overflow-hidden group relative">
+                    <div key={i} className="rounded-xl overflow-hidden group relative" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
                       <video src={v.url} className="w-full h-40 object-contain bg-white" />
                     </div>
                   ))}
@@ -324,9 +327,9 @@ export default function VideoGenPage() {
           </>
         ) : (
           <>
-            <div className="glass-card rounded-2xl p-5 mb-6">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 block">选择项目</label>
-              <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="w-full bg-muted border border-border rounded-xl px-4 py-3 text-sm">
+            <div className="rounded-2xl p-5 mb-6 card-glow glass-card">
+              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-3 block">选择项目</label>
+              <select value={selectedProject} onChange={e => { const v = e.target.value; setSelectedProject(v); localStorage.setItem('lastProject', v) }} className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-4 py-3 text-sm input-field">
                 <option value="">-- 请选择项目 --</option>
                 {projects.map(p => (<option key={p.name} value={p.name}>{p.name}</option>))}
               </select>

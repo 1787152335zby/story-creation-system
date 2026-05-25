@@ -1,4 +1,4 @@
-import type { ProjectInfo, EntityImagesMap, FreeImageResult, ProjectImageGenResult, FreeVideoResult, GenerationHistory, Template } from './types'
+import type { ProjectInfo, EntityImagesMap, FreeImageResult, ProjectImageGenResult, FreeVideoResult, GenerationHistory, HistoryEntry, Template, CharacterInfo, SceneInfo, PropInfo } from './types'
 
 const BASE = '/api'
 
@@ -17,6 +17,7 @@ export interface StyleConfig {
   custom_requirements: string
   visual_reference: string
   action_reference: string
+  mood: string
 }
 
 export interface CreateProjectPayload {
@@ -24,6 +25,8 @@ export interface CreateProjectPayload {
   story_idea: string
   style: StyleConfig
   duration_line: string
+  model: string
+  template_name?: string
 }
 
 export interface AggConfig {
@@ -82,6 +85,17 @@ export async function fetchPhaseContent(name: string, phase: string): Promise<{ 
   return res.json()
 }
 
+export async function savePhaseContent(name: string, phaseFile: string, content: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/${encodeURIComponent(phaseFile)}/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+    return res.ok
+  } catch { return false }
+}
+
 export async function createProject(payload: CreateProjectPayload): Promise<{ name: string }> {
   const res = await fetch(`${BASE}/projects`, {
     method: 'POST',
@@ -105,11 +119,25 @@ export async function updateProjectConfig(name: string, config: Record<string, a
   return res.json()
 }
 
-export async function generateRandomIdea(style: StyleConfig): Promise<string> {
+export async function renameProject(name: string, newName: string): Promise<{ renamed: boolean; name: string }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/rename`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: newName }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || '重命名失败')
+  }
+  return res.json()
+}
+
+export async function generateRandomIdea(style: StyleConfig, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`${BASE}/projects/random-idea`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(style),
+    signal,
   })
   if (!res.ok) throw new Error('Failed to generate random idea')
   const data = await res.json()
@@ -145,20 +173,32 @@ export async function testLLM(backend: string, apiKey: string, model: string): P
   return res.json()
 }
 
+export async function fetchImageDemands(projectName: string): Promise<any> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/image-demands`)
+  if (!res.ok) return { characters: [], scenes: [], key_props: [] }
+  return res.json()
+}
+
 export async function fetchVisualAssets(name: string): Promise<{ characters: { name: string; file: string }[]; scenes: { name: string; file: string }[] }> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/visual-assets`)
   if (!res.ok) return { characters: [], scenes: [] }
   return res.json()
 }
 
-export async function fetchCharacters(name: string): Promise<any[]> {
+export async function fetchCharacters(name: string): Promise<CharacterInfo[]> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/characters`)
   if (!res.ok) return []
   return res.json()
 }
 
-export async function fetchScenes(name: string): Promise<any[]> {
+export async function fetchScenes(name: string): Promise<SceneInfo[]> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/scenes`)
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function fetchProps(name: string): Promise<PropInfo[]> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/props`)
   if (!res.ok) return []
   return res.json()
 }
@@ -195,11 +235,15 @@ export function getMediaUrl(name: string, subpath: string): string {
   return `${BASE}/projects/${encodeURIComponent(name)}/media/${encodeURIComponent(subpath)}`
 }
 
-export async function freeImageGen(prompt: string, negativePrompt: string = '', size: string = '1024x1024', n: number = 1, model: string = ''): Promise<FreeImageResult> {
+export async function freeImageGen(prompt: string, negativePrompt: string = '', size: string = '1024x1024', n: number = 1, model: string = '', referenceUrls: string[] = [], referenceUrlsByType?: import('./types').ReferenceUrlsByType, extraParams: Record<string, unknown> = {}): Promise<FreeImageResult> {
+  const body: Record<string, unknown> = { prompt, negative_prompt: negativePrompt, size, n, model, reference_urls: referenceUrls, extra_params: extraParams }
+  if (referenceUrlsByType) {
+    body.reference_urls_by_type = referenceUrlsByType
+  }
   const res = await fetch(`${BASE}/image-gen/free`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, negative_prompt: negativePrompt, size, n, model }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -231,8 +275,8 @@ export async function freeVideoGen(prompt: string, files?: File[], model?: strin
 export async function fetchProjectVisualAssets(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/visual-assets`)
   if (!res.ok) return { characters: {}, scenes: {} }
-  const raw: { characters: { name: string; file: string; from_generated?: boolean }[]; scenes: { name: string; file: string; from_generated?: boolean }[] } = await res.json()
-  const result: { characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> } = { characters: {}, scenes: {} }
+  const raw: { characters: { name: string; file: string; from_generated?: boolean }[]; scenes: { name: string; file: string; from_generated?: boolean }[]; props: { name: string; file: string; from_generated?: boolean }[] } = await res.json()
+  const result: { characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]>; props: Record<string, { name: string; url: string }[]> } = { characters: {}, scenes: {}, props: {} }
   for (const item of raw.characters || []) {
     const url = item.from_generated
       ? `/api/gen-files/${item.file}`
@@ -246,6 +290,13 @@ export async function fetchProjectVisualAssets(projectName: string): Promise<Ent
       : getMediaUrl(projectName, `07_视觉素材/场景/${item.file}`)
     if (!result.scenes[item.name]) result.scenes[item.name] = []
     result.scenes[item.name].push({ name: item.name, url })
+  }
+  for (const item of raw.props || []) {
+    const url = item.from_generated
+      ? `/api/gen-files/${item.file}`
+      : getMediaUrl(projectName, `07_视觉素材/道具/${item.file}`)
+    if (!result.props[item.name]) result.props[item.name] = []
+    result.props[item.name].push({ name: item.name, url })
   }
   return result
 }
@@ -368,6 +419,12 @@ export async function fetchGenerationHistory(): Promise<GenerationHistory> {
   return res.json()
 }
 
+export async function fetchGenerationHistoryItem(filename: string): Promise<Partial<HistoryEntry>> {
+  const res = await fetch(`${BASE}/generated-history/${encodeURIComponent(filename)}`)
+  if (!res.ok) return {}
+  return res.json()
+}
+
 export async function projectImageGen(params: {
   project_name: string
   prompt: string
@@ -377,10 +434,58 @@ export async function projectImageGen(params: {
   model?: string
   character_names?: string[]
   scene_names?: string[]
+  prop_names?: string[]
   reference_url?: string
   reference_urls?: string[]
+  reference_urls_by_type?: import('./types').ReferenceUrlsByType
   version?: string
 }): Promise<ProjectImageGenResult> {
+  const res = await fetch(`${BASE}/image-gen/project`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '请求失败') }
+  return res.json()
+}
+
+export async function projectDemandBatchGen(params: {
+  project_name: string
+  prompt: string
+  negative_prompt?: string
+  size?: string
+  n?: number
+  model?: string
+  character_names?: string[]
+  scene_names?: string[]
+  prop_names?: string[]
+  reference_url?: string
+  reference_urls?: string[]
+  reference_urls_by_type?: import('./types').ReferenceUrlsByType
+  version?: string
+}): Promise<any> {
+  const res = await fetch(`${BASE}/image-gen/project-demand-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) { const e = await res.json(); throw new Error(e.detail || '请求失败') }
+  return res.json()
+}
+
+export async function projectPropGen(params: {
+  project_name: string
+  prompt: string
+  negative_prompt?: string
+  size?: string
+  n?: number
+  model?: string
+  prop_names?: string[]
+  reference_url?: string
+  reference_urls?: string[]
+  reference_urls_by_type?: import('./types').ReferenceUrlsByType
+  version?: string
+}): Promise<any> {
   const res = await fetch(`${BASE}/image-gen/project`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -402,13 +507,13 @@ export async function stitchImages(imagePaths: string[], saveTo: string = ''): P
 
 export async function fetchProjectImages(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/image-gen/project-images/${encodeURIComponent(projectName)}`)
-  if (!res.ok) return { characters: {}, scenes: {} }
+  if (!res.ok) return { characters: {}, scenes: {}, props: {} }
   return res.json()
 }
 
 export async function fetchConfirmedImages(projectName: string): Promise<EntityImagesMap> {
   const res = await fetch(`${BASE}/image-gen/confirmed-images/${encodeURIComponent(projectName)}`)
-  if (!res.ok) return { characters: {}, scenes: {} }
+  if (!res.ok) return { characters: {}, scenes: {}, props: {} }
   return res.json()
 }
 
@@ -498,5 +603,90 @@ export async function generateCombinedPrompt(projectName: string, characterNames
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_name: projectName, character_names: characterNames, scene_names: sceneNames, storyboard_chunk: storyboardChunk }),
   })
+  return res.json()
+}
+
+export async function fetchImagePresets(): Promise<any[]> {
+  const res = await fetch(`${BASE}/image-presets`)
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function uploadReferenceImage(file: File): Promise<string> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch(`${BASE}/upload-reference`, {
+    method: 'POST',
+    body: formData,
+  })
+  const data = await res.json()
+  return data.url
+}
+
+export async function fetchCharacterPrompt(projectName: string, characterName: string): Promise<{ prompt: string; style_decl: string; base_character: string | null }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/character-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_name: characterName }),
+  })
+  if (!res.ok) return { prompt: '', style_decl: '', base_character: null }
+  return res.json()
+}
+
+export async function fetchCharacterConfirmedImages(projectName: string, characterName: string): Promise<{ images: { url: string; name: string; version: string }[]; version: string }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/character-confirmed-images/${encodeURIComponent(characterName)}`)
+  if (!res.ok) return { images: [], version: '' }
+  return res.json()
+}
+
+export async function fetchScenePrompt(projectName: string, sceneName: string, viewDirection?: string): Promise<{ prompt: string; style_decl: string; base_scene: string | null }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/scene-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scene_name: sceneName, view_direction: viewDirection || '正视图' }),
+  })
+  if (!res.ok) return { prompt: '', style_decl: '', base_scene: null }
+  return res.json()
+}
+
+export async function fetchSceneConfirmedImages(projectName: string, sceneName: string): Promise<{ images: { url: string; name: string; version: string }[]; version: string }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/scene-confirmed-images/${encodeURIComponent(sceneName)}`)
+  if (!res.ok) return { images: [], version: '' }
+  return res.json()
+}
+
+export async function analyzeStyleReference(projectName: string, file: File): Promise<import('./types').AnalyzeStyleResult> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/analyze-style-reference`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || '风格分析失败')
+  }
+  return res.json()
+}
+
+export async function fetchPropPrompt(projectName: string, characterName: string, propName: string): Promise<{ prompt: string; character_name: string }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/prop-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ character_name: characterName, prop_name: propName }),
+  })
+  if (!res.ok) return { prompt: '', character_name: characterName }
+  return res.json()
+}
+
+export async function fetchProjectAssetLibrary(projectName: string): Promise<import('./types').AssetLibrary> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/asset-library`)
+  if (!res.ok) return { characters: {}, scenes: {}, props: {} }
+  return res.json()
+}
+
+export async function fetchPropsSummary(projectName: string): Promise<{ props: { name: string; shared_by: string[]; appearance: string; style: string }[] }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/props-summary`)
+  if (!res.ok) return { props: [] }
   return res.json()
 }

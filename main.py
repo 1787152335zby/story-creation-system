@@ -99,13 +99,11 @@ def cmd_start():
     visual_ref = input().strip()
     if visual_ref.lower() in ("", "/skip", "/s"):
         visual_ref = ""
-    style.visual_reference = visual_ref
 
     console.print("\n[bold yellow]⚔️ 是否有动作/打斗参考作品？（如特定电影的动作设计风格，没有则输入 /skip）[/bold yellow]")
     action_ref = input().strip()
     if action_ref.lower() in ("", "/skip", "/s"):
         action_ref = ""
-    style.action_reference = action_ref
 
     mood_choices = [(str(i+1), g) for i, g in enumerate(MOOD_TAGS)]
     mood_ids = select_option(
@@ -142,6 +140,8 @@ def cmd_start():
     style.episode_duration = episode_duration
     style.mood = mood_value
     style.custom_requirements = extra_req if extra_req != "/skip" else ""
+    style.visual_reference = visual_ref
+    style.action_reference = action_ref
 
     project_name = input("\n[bold yellow]给这个项目起个名字：[/bold yellow]").strip()
     if not project_name:

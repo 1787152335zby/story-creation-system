@@ -28,13 +28,13 @@ class ChunkStrategy:
     def get_plan(story_type: str) -> ChunkPlan:
         plan_map = {
             "2": ChunkPlan(3, ["第一幕", "第二幕", "第三幕"], True,
-                           r"^#{1,4}\s*(第一幕|第二幕|第三幕)", 0, True),
+                           r"^#{1,2}\s*(第一幕|第二幕|第三幕)", 0, True),
             "5": ChunkPlan(3, ["第一幕", "第二幕", "第三幕"], True,
-                           r"^#{1,4}\s*(第一幕|第二幕|第三幕)", 0, True),
-            "1": ChunkPlan(0, [], False, r"^#{1,4}\s*第\d+集", 3, True),
-            "3": ChunkPlan(0, [], False, r"^#{1,4}\s*第\d+集", 2, True),
-            "4": ChunkPlan(0, [], False, r"^#{1,4}\s*第\d+章", 3, True, bible_mode=True),
-            "6": ChunkPlan(0, [], False, r"^#{1,4}\s*第\d+集", 0, True),
+                           r"^#{1,2}\s*(第一幕|第二幕|第三幕)", 0, True),
+            "1": ChunkPlan(0, [], False, r"^#{1,2}\s*第\d+集", 3, True),
+            "3": ChunkPlan(0, [], False, r"^#{1,2}\s*第\d+集", 2, True),
+            "4": ChunkPlan(0, [], False, r"^#{1,2}\s*第\d+章", 3, True, bible_mode=True),
+            "6": ChunkPlan(0, [], False, r"^#{1,2}\s*第\d+集", 0, True),
         }
         return plan_map.get(story_type, ChunkPlan(1, ["全部"], False, "", 0, False))
 
@@ -100,10 +100,18 @@ class ChunkIter:
                 blocks.append({"index": i, "name": plan.chunk_names[i], "content": outline[start:end]})
         return blocks
 
-    def set_auto_blocks(self, count: int):
+    def set_auto_blocks(self, count: int, outline: str = ""):
         self.plan.chunk_count = count
         self.plan.chunk_names = [f"第{i+1}集" for i in range(count)]
-        self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": ""} for i in range(count)]
+        if outline and len(outline) > 100 and count > 1:
+            per_chunk = len(outline) // count
+            self.blocks = []
+            for i in range(count):
+                start = i * per_chunk
+                end = (i + 1) * per_chunk if i < count - 1 else len(outline)
+                self.blocks.append({"index": i, "name": self.plan.chunk_names[i], "content": outline[start:end]})
+        else:
+            self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": ""} for i in range(count)]
 
     def __iter__(self):
         indices = list(range(len(self.blocks)))
