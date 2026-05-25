@@ -1,5 +1,6 @@
 import re
 import base64, random
+import logging
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 import os, json, uuid, time, requests, shutil, threading
 from tools.video_api_seedance import SeedanceBackend
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -913,8 +916,10 @@ def confirm_version(project_name: str = Query(...), entity_type: str = Query(...
         raise HTTPException(status_code=404, detail=f"版本 v{version} 不存在")
     for f in list(dst.iterdir()):
         if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") and f.name != ".gitkeep":
-            try: f.unlink()
-            except: pass
+            try:
+                f.unlink()
+            except Exception:
+                logger.warning(f"清理旧版本图片失败: {f}")
     for f in src.iterdir():
         if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
             import shutil
@@ -957,8 +962,10 @@ def delete_version(project_name: str = Query(...), entity_type: str = Query(...)
     dst = PROJECTS_DIR / project_name / "07_生成素材" / entity_type / entity_name
     confirmed_fn = dst / "_confirmed"
     if confirmed_fn.exists() and confirmed_fn.read_text().strip() == f"v{version}":
-        try: confirmed_fn.unlink()
-        except: pass
+        try:
+            confirmed_fn.unlink()
+        except Exception:
+            logger.warning(f"清除确认标记失败: {confirmed_fn}")
     return {"deleted": True, "version": version}
 
 
@@ -1023,8 +1030,10 @@ async def free_video_gen(
         local_path = _download_file(video_url, GENERATED_DIR, "video_")
 
         for sp in saved_paths:
-            try: os.remove(sp)
-            except: pass
+            try:
+                os.remove(sp)
+            except Exception:
+                logger.warning(f"清理临时图片失败: {sp}")
 
         # 写入视频元数据
         try:
@@ -1044,14 +1053,16 @@ async def free_video_gen(
             }
             meta_path = meta_dir / f"{video_filename}.json"
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"写入视频元数据失败: {e}")
 
         return {"video_url": video_url, "local": local_path, "task_id": task_id}
     except Exception as e:
         for sp in saved_paths:
-            try: os.remove(sp)
-            except: pass
+            try:
+                os.remove(sp)
+            except Exception:
+                logger.warning(f"清理失败临时图片失败: {sp}")
         return {"error": str(e), "task_id": task_id if "task_id" in dir() else ""}
 
 
