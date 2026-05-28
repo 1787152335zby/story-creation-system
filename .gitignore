@@ -38,6 +38,9 @@ check_*.ps1
 compare_*.py
 compare_*.ps1
 fetch_*.ps1
+fetch_*.py
+display_*.py
+uumit_*
 display_*.ps1
 decode_*.py
 decode_and_notify.py
