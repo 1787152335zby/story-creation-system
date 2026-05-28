@@ -158,6 +158,7 @@ class ProjectImageRequest(BaseModel):
     prop_names: list[str] = []
     reference_url: str = ""
     reference_urls: list[str] = []
+    reference_urls_by_type: dict = {}
     version: str = ""
     extra_params: dict = {}
 
@@ -423,7 +424,9 @@ def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
             except requests.exceptions.ConnectionError as e:
                 if "timeout" in str(e).lower() or "timed out" in str(e).lower():
                     raise HTTPException(status_code=504, detail="生图请求超时，API 响应时间超过 5 分钟，请稍后重试")
-                raise
+                raise HTTPException(status_code=502, detail=f"无法连接到图片 API 服务器: {str(e)[:200]}")
+            except requests.exceptions.RequestException as e:
+                raise HTTPException(status_code=502, detail=f"图片 API 请求失败: {str(e)[:200]}")
         if not urls:
             raise HTTPException(status_code=500, detail="Gemini 模型返回了内容但没有解析到图片数据")
         return urls, sd
@@ -559,7 +562,8 @@ def free_image_gen(req: FreeImageRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生图失败: {str(e)}")
+        logger.exception(f"生图失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生图失败: {str(e)[:300]}")
     finally:
         with _cancel_lock:
             _cancel_events.pop(task_id, None)
@@ -579,15 +583,19 @@ def project_demand_batch_gen(req: ProjectImageRequest):
         demand_path = PROJECTS_DIR / req.project_name / "06_生图需求" / "生图清单.json"
         if not demand_path.exists():
             demand_path = PROJECTS_DIR / req.project_name / "07_生图需求" / "生图清单.json"
+        demands = None
+        if demand_path.exists():
+            demands = json.loads(demand_path.read_text(encoding="utf-8"))
         if not demand_path.exists():
-            raise HTTPException(status_code=404, detail="找不到生图需求清单，请先运行生图准备阶段")
+            if not req.prompt.strip():
+                raise HTTPException(status_code=404, detail="找不到生图需求清单，请先运行生图准备阶段")
 
-        demands = json.loads(demand_path.read_text(encoding="utf-8"))
-        all_chars = demands.get("characters", [])
-        all_scenes = demands.get("scenes", [])
+        all_chars = (demands or {}).get("characters", [])
+        all_scenes = (demands or {}).get("scenes", [])
 
-        if not req.character_names and not req.scene_names:
-            raise HTTPException(status_code=400, detail="请指定要生成的角色或场景")
+        if not req.character_names and not req.scene_names and not req.prop_names:
+            if not req.prompt.strip():
+                raise HTTPException(status_code=400, detail="请指定要生成的角色或场景，或输入提示词")
 
         results = []
         to_gen = []
@@ -640,7 +648,11 @@ def project_demand_batch_gen(req: ProjectImageRequest):
             saved = []
             for url in urls:
                 if os.path.exists(url) and GENERATED_DIR in Path(url).parents:
-                    saved.append({"url": url, "local": url})
+                    old_path = Path(url)
+                    new_name = f"proj_{uuid.uuid4().hex[:8]}{old_path.suffix}"
+                    new_path = old_path.with_name(new_name)
+                    old_path.rename(new_path)
+                    saved.append({"url": url, "local": str(new_path)})
                 else:
                     local = _download_file(url, GENERATED_DIR, "proj_")
                     saved.append({"url": url, "local": local})
@@ -664,7 +676,8 @@ def project_demand_batch_gen(req: ProjectImageRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生图失败: {str(e)}")
+        logger.exception(f"生图失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生图失败: {str(e)[:300]}")
     finally:
         with _cancel_lock:
             _cancel_events.pop(task_id, None)

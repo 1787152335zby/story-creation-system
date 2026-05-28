@@ -4,6 +4,11 @@ import os
 import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
+
+def _natsort_key(path):
+    name = path.name
+    nums = re.findall(r'\d+', name)
+    return (0, int(nums[0])) if nums else (1, name)
 from ..schemas import CreateProjectRequest, StyleConfigRequest
 
 router = APIRouter()
@@ -72,21 +77,38 @@ def get_phase_content(name: str, phase: str):
     if phase_path.is_dir():
         root_md = list(phase_path.glob("*.md"))
         sub_md = []
-        for subdir in sorted(phase_path.iterdir()):
+        for subdir in sorted(phase_path.iterdir(), key=_natsort_key):
             if subdir.is_dir():
                 sub_md.extend(subdir.glob("*.md"))
         md_files = root_md + sub_md
         md_files = [f for f in md_files if not f.name.startswith("分镜提示词")]
         stems_with_ji = {f.stem for f in md_files if f.stem.endswith('集')}
         md_files = [f for f in md_files if not (f.stem + '集' in stems_with_ji)]
-        cn_num = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
+        cn_char = dict(zip('一二三四五六七八九十百千', [1,2,3,4,5,6,7,8,9,10,100,1000]))
+
+        def _cn_to_num(s):
+             s = s.replace('零', '')
+             total = 0; base = 0
+             for ch in s:
+                 if ch in cn_char:
+                     v = cn_char[ch]
+                     if v >= 10:
+                         if base == 0:
+                             base = 1
+                         total += base * v
+                         base = 0
+                     else:
+                         base = v
+             return total + base
+
         def sort_key(f):
             name = f.stem
-            for cn, num in cn_num.items():
-                if cn in name:
-                    return (0, num)
+            cn_match = re.search(r'[一二三四五六七八九十百千]+', name)
+            if cn_match:
+                return (0, _cn_to_num(cn_match.group()))
             nums = re.findall(r'\d+', name)
             return (1, int(nums[0]) if nums else 0)
+
         md_files.sort(key=sort_key)
         if not md_files:
             raise HTTPException(status_code=404, detail="无内容")
@@ -183,6 +205,181 @@ def _inline_md(text: str) -> str:
     return text
 
 
+def _is_dialogue_line(text: str) -> bool:
+    return bool(text) and (text[0] == '"' or text[0] == '\u201c' or text[0] == '\u2018')
+
+
+def _system_script_to_market(text: str) -> str:
+    lines = text.split('\n')
+    out = []
+    ep_num = 0
+    scene_num = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        m = re.match(r'^#{1,3}\s*第(\d+)集', stripped)
+        if m:
+            ep_num = int(m.group(1))
+            scene_num = 0
+            out.append(f'第{ep_num}集')
+            out.append('')
+            i += 1
+            continue
+
+        m = re.match(r'^###\s*第(\d+)场\s*[-—]\s*(.+)$', stripped)
+        if m:
+            scene_num = int(m.group(1))
+            location_full = m.group(2).strip()
+            parts = re.split(r'\s*[·•]\s*', location_full, maxsplit=1)
+            location = parts[0]
+            time_str = parts[1] if len(parts) > 1 else '白天'
+            out.append(f'{ep_num}-{scene_num} {time_str} 内 {location}')
+            out.append('')
+            i += 1
+            continue
+
+        if stripped.startswith('出场角色：'):
+            content = stripped[len('出场角色：'):]
+            out.append(f'出场人物：{content}')
+            out.append('')
+            i += 1
+            continue
+
+        if stripped == '---':
+            out.append('')
+            i += 1
+            continue
+
+        if not stripped:
+            out.append('')
+            i += 1
+            continue
+
+        if stripped.startswith('#') or stripped.startswith('▶'):
+            out.append(stripped)
+            i += 1
+            continue
+
+        j, merged = _try_merge_dialogue(lines, i, stripped)
+        if merged:
+            out.append(merged)
+            i = j
+            continue
+
+        if stripped.startswith('（'):
+            j, merged = _try_merge_multiline_action(lines, i)
+            if merged:
+                out.append(merged)
+                i = j
+                continue
+            if stripped.endswith('）'):
+                action = stripped[1:-1]
+                out.append(f'▶ {action}')
+                i += 1
+                continue
+
+        out.append(stripped)
+        i += 1
+
+    return '\n'.join(out)
+
+
+def _try_merge_dialogue(lines, i, stripped):
+    inline_emotion = re.match(r'^(.+?)（(.+?)）$', stripped)
+    if inline_emotion:
+        char_name = inline_emotion.group(1)
+        emotion1 = inline_emotion.group(2)
+        j = i + 1
+        emotion2 = ''
+        if j < len(lines) and lines[j].strip().startswith('（') and lines[j].strip().endswith('）'):
+            emotion2 = lines[j].strip()[1:-1]
+            j += 1
+        if j < len(lines) and _is_dialogue_line(lines[j].strip()):
+            dialogue = lines[j].strip()
+            j += 1
+            full_emotion = f'{emotion1}，{emotion2}' if emotion2 else emotion1
+            return j, f'{char_name}（{full_emotion}）：{dialogue}'
+        return i, None
+
+    j = i + 1
+    emotion = ''
+    if j < len(lines) and lines[j].strip().startswith('（') and lines[j].strip().endswith('）'):
+        emotion = lines[j].strip()[1:-1]
+        j += 1
+    if j < len(lines) and _is_dialogue_line(lines[j].strip()):
+        dialogue = lines[j].strip()
+        j += 1
+        if emotion:
+            return j, f'{stripped}（{emotion}）：{dialogue}'
+        else:
+            return j, f'{stripped}：{dialogue}'
+
+    return i, None
+
+
+def _try_merge_multiline_action(lines, i):
+    stripped = lines[i].strip()
+    if not stripped.startswith('（'):
+        return i, None
+    if stripped.endswith('）'):
+        return i, None
+    j = i + 1
+    while j < len(lines):
+        ls = lines[j].strip()
+        if not ls:
+            j += 1
+            continue
+        if _is_dialogue_line(ls) or re.match(r'^#{1,3}\s', ls) or re.match(r'^出场角色：', ls) or ls == '---':
+            return i, None
+        if ls.endswith('）'):
+            part = stripped[1:]
+            for k in range(i + 1, j):
+                if lines[k].strip():
+                    part += lines[k].strip()
+            part += ls[:-1]
+            return j + 1, f'▶ {part}'
+        j += 1
+    return i, None
+
+
+def _market_to_html(text: str) -> str:
+    lines = text.split('\n')
+    out_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            out_lines.append('<br/>')
+            continue
+        if re.match(r'^第\d+集$', stripped):
+            out_lines.append(f'<h2>{stripped}</h2>')
+            continue
+        if re.match(r'^\d+-\d+\s+', stripped):
+            out_lines.append(f'<h3>{stripped}</h3>')
+            continue
+        if stripped.startswith('出场人物：'):
+            out_lines.append(f'<p><b>{stripped}</b></p>')
+            continue
+        out_lines.append(f'<p>{stripped}</p>')
+    return '\n'.join(out_lines)
+
+
+def _should_use_market_format(project_dir: Path, phase_or_path: str) -> bool:
+    config_file = project_dir / "project_config.json"
+    if not config_file.exists():
+        return False
+    try:
+        cfg = json.loads(config_file.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if cfg.get("script_format", "1") != "2":
+        return False
+    path_lower = phase_or_path.lower().replace('\\', '/')
+    is_script = '剧本' in path_lower or '03_' in path_lower or 'script' in path_lower
+    return is_script
+
+
 @router.get("/projects/{name}/{phase:path}/export-docx")
 def export_phase_docx(name: str, phase: str):
     from fastapi.responses import Response
@@ -194,7 +391,7 @@ def export_phase_docx(name: str, phase: str):
     if phase_path.is_dir():
         root_md = list(phase_path.glob("*.md"))
         sub_md = []
-        for subdir in sorted(phase_path.iterdir()):
+        for subdir in sorted(phase_path.iterdir(), key=_natsort_key):
             if subdir.is_dir():
                 sub_md.extend(subdir.glob("*.md"))
         md_files = root_md + sub_md
@@ -204,7 +401,12 @@ def export_phase_docx(name: str, phase: str):
     else:
         full_text = phase_path.read_text(encoding="utf-8")
 
-    html_body = _md_to_html(full_text)
+    use_market = _should_use_market_format(project_dir, phase)
+    if use_market:
+        full_text = _system_script_to_market(full_text)
+        html_body = _market_to_html(full_text)
+    else:
+        html_body = _md_to_html(full_text)
     display_name = phase.rstrip("/").replace("\\", "/").split("/")[-1]
 
     docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -257,7 +459,7 @@ def export_project_batch(name: str, phases: str = ""):
         if phase_path.is_dir():
             root_md = list(phase_path.glob("*.md"))
             sub_md = []
-            for subdir in sorted(phase_path.iterdir()):
+            for subdir in sorted(phase_path.iterdir(), key=_natsort_key):
                 if subdir.is_dir():
                     sub_md.extend(subdir.glob("*.md"))
             md_files = root_md + sub_md
@@ -267,11 +469,16 @@ def export_project_batch(name: str, phases: str = ""):
         else:
             text = phase_path.read_text(encoding="utf-8")
 
-        phase_label = phase.replace("_", " ").replace("0", "").replace("1", "1").replace("2", "2").replace("3", "3").replace("4", "4").replace("5", "5").replace("6", "6")
-        # 简化阶段标题
+        use_market = _should_use_market_format(project_dir, phase)
+        if use_market:
+            text = _system_script_to_market(text)
+            phase_html = _market_to_html(text)
+        else:
+            phase_html = _md_to_html(text)
+
         import re as _re
         phase_label = _re.sub(r'^\d+_', '', phase)
-        all_parts.append(f"<h1>{phase_label}</h1>\n{_md_to_html(text)}")
+        all_parts.append(f"<h1>{phase_label}</h1>\n{phase_html}")
 
     if not all_parts:
         raise HTTPException(status_code=404, detail="所选阶段没有内容")
@@ -384,7 +591,12 @@ def export_single_file(name: str, phase: str = "", file: str = ""):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     text = file_path.read_text(encoding="utf-8")
-    html_body = _md_to_html(text)
+    use_market = _should_use_market_format(project_dir, phase)
+    if use_market:
+        text = _system_script_to_market(text)
+        html_body = _market_to_html(text)
+    else:
+        html_body = _md_to_html(text)
 
     docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
 xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -429,10 +641,15 @@ def export_phase_all(name: str, phase: str = ""):
         raise HTTPException(status_code=404, detail="该阶段无内容")
 
     all_html: list[str] = []
+    use_market = _should_use_market_format(project_dir, phase)
     for mf in sorted(md_files):
         rel = mf.relative_to(phase_path).as_posix()
         text = mf.read_text(encoding="utf-8")
-        all_html.append(f"<h2>{rel}</h2>\n{_md_to_html(text)}")
+        if use_market:
+            text = _system_script_to_market(text)
+            all_html.append(f"<h2>{rel}</h2>\n{_market_to_html(text)}")
+        else:
+            all_html.append(f"<h2>{rel}</h2>\n{_md_to_html(text)}")
 
     html_body = "\n<hr style='border:2px solid #333; margin:30px 0; page-break-after: always;'/>\n".join(all_html)
 
@@ -815,6 +1032,8 @@ def get_props_summary(name: str):
     prop_map: dict[str, set] = {}
     for c in chars:
         for acc in c.get("accessories", []):
+            if not isinstance(acc, dict):
+                continue
             pname = acc.get("name", "")
             if not pname:
                 continue

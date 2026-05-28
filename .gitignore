@@ -62,3 +62,11 @@ server.js
 # Test HTML
 threejs-water-test.html
 gpu-test.html
+
+# Personal files
+简历_*
+面试*
+*简历*
+*.doc
+*.docx
+*.files/

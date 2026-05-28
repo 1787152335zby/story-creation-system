@@ -113,7 +113,7 @@ class PlotExpander(AgentBase):
             # 优先使用用户配置的集数
             if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
                 chunk_count = int(style.episode_count)
-                chunk_count = max(1, min(chunk_count, 20))
+                chunk_count = max(1, min(chunk_count, 200))
                 iterator.set_auto_blocks(chunk_count, outline=outline)
             else:
                 count_prompt = (
@@ -126,7 +126,7 @@ class PlotExpander(AgentBase):
                     count_text += token
                 nums = re.findall(r'\d+', count_text)
                 chunk_count = int(nums[0]) if nums else 3
-                chunk_count = max(1, min(chunk_count, 20))
+                chunk_count = max(1, min(chunk_count, 200))
                 iterator.set_auto_blocks(chunk_count, outline=outline)
         self._gen_template = template
         self._gen_style_context = style_context
@@ -196,7 +196,7 @@ class PlotExpander(AgentBase):
                                story_type_name, style, feedback):
         if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
             chunk_count = int(style.episode_count)
-            chunk_count = max(1, min(chunk_count, 20))
+            chunk_count = max(1, min(chunk_count, 200))
         else:
             count_prompt = (
                 f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
@@ -208,7 +208,7 @@ class PlotExpander(AgentBase):
                 count_text += token
             nums = re.findall(r'\d+', count_text)
             chunk_count = int(nums[0]) if nums else 3
-            chunk_count = max(1, min(chunk_count, 20))
+            chunk_count = max(1, min(chunk_count, 200))
         iterator.set_auto_blocks(chunk_count, outline=outline)
 
         for ctx in iterator:

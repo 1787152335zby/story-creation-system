@@ -202,6 +202,8 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
   const [expandedChars, setExpandedChars] = useState<Record<string, boolean>>({})
   const [expandedScenes, setExpandedScenes] = useState<Record<string, boolean>>({})
   const [generatingStatus, setGeneratingStatus] = useState('')
+  const [elapsedTime, setElapsedTime] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [promptEdited, setPromptEdited] = useState(false)
   const [historySearch, setHistorySearch] = useState('')
   const [propsSummary, setPropsSummary] = useState<any[]>([])
@@ -218,6 +220,23 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
   const refPickerRef = useRef<HTMLDivElement>(null)
   const [refHistoryImages, setRefHistoryImages] = useState<{ name: string; url: string }[]>([])
   const [refHistoryLoading, setRefHistoryLoading] = useState(false)
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = s % 60
+    return m > 0 ? `${m}分${sec}秒` : `${sec}秒`
+  }
+
+  useEffect(() => {
+    if (projectGenerating) {
+      setElapsedTime(0)
+      timerRef.current = setInterval(() => setElapsedTime(t => t + 1), 1000)
+      return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+      setElapsedTime(0)
+    }
+  }, [projectGenerating])
 
   const charTree = useMemo(() => {
     const chars = (characters || []) as CharacterInfo[]
@@ -411,6 +430,8 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
   const handleGen = async () => {
     if (!projectPrompt.trim()) return
     setProjectGenerating(true)
+    setProjectError('')
+    setGeneratingStatus(selectedChar ? `正在生成 ${selectedChar}...` : selectedScene ? `正在生成 ${selectedScene}...` : '生成中...')
     try {
       await genWithBaseImages({
         project_name: selectedProject,
@@ -426,7 +447,11 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
       })
       fetchGenerationHistory().then(h => setHistoryProject(h?.images_project || []))
       fetchProjectImages(selectedProject).then(setGeneratedImages)
-    } catch {} finally { setProjectGenerating(false) }
+      setGeneratingStatus('')
+    } catch (e: any) {
+      setGeneratingStatus('')
+      setProjectError(e?.message || '生成失败')
+    } finally { setProjectGenerating(false) }
   }
 
   return (
@@ -1241,11 +1266,18 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
                 onGeneralRefToggle={setGeneralRefEnabled}
               />
 
+              {projectError && (
+                <div className="premium-subpanel p-3 mt-3 border border-red-400/30 bg-red-500/5 rounded-xl">
+                  <p className="text-[11px] text-red-400">{projectError}</p>
+                </div>
+              )}
+
               {projectGenerating ? (
                 <div className="space-y-2 mt-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     <span>{generatingStatus || '生成中...'}</span>
+                    <span className="text-xs text-muted-foreground/60 font-mono">耗时 {formatTime(elapsedTime)}</span>
                   </div>
                   {currentTaskId && (
                     <button onClick={onCancel}
@@ -1257,7 +1289,7 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
               ) : (
                 <div className="flex flex-wrap gap-2 mt-4">
                   <button onClick={useCharTemplate ? handleCharTemplateGen : useSceneTemplate ? handleSceneTemplateGen : handleGen}
-                    disabled={!projectPrompt.trim() || (!selectedChar && !selectedScene)}
+                    disabled={!projectPrompt.trim()}
                     className={`flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-50 transition-all ${
                       useCharTemplate || useSceneTemplate
                         ? 'border-2 border-primary/30 text-primary hover:bg-primary/10'

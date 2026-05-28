@@ -201,7 +201,7 @@ class ScreenplayWriter(AgentBase):
             # 优先使用用户配置的集数
             if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
                 chunk_count = int(style.episode_count)
-                chunk_count = max(1, min(chunk_count, 20))
+                chunk_count = max(1, min(chunk_count, 200))
                 iterator.set_auto_blocks(chunk_count)
             else:
                 count_prompt = (f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
@@ -211,7 +211,7 @@ class ScreenplayWriter(AgentBase):
                     count_text += token
                 nums = re.findall(r'\d+', count_text)
                 chunk_count = int(nums[0]) if nums else 3
-                chunk_count = max(1, min(chunk_count, 20))
+                chunk_count = max(1, min(chunk_count, 200))
                 iterator.set_auto_blocks(chunk_count)
         self._gen_template = template
         self._gen_style_context = style_context
@@ -234,7 +234,7 @@ class ScreenplayWriter(AgentBase):
         script_format_name = {"1": "系统格式", "2": "市场格式"}.get(style.script_format, "系统格式")
         if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
             chunk_count = int(style.episode_count)
-            chunk_count = max(1, min(chunk_count, 20))
+            chunk_count = max(1, min(chunk_count, 200))
         else:
             count_prompt = (
                 f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
@@ -245,7 +245,7 @@ class ScreenplayWriter(AgentBase):
                 count_text += token
             nums = re.findall(r'\d+', count_text)
             chunk_count = int(nums[0]) if nums else 3
-            chunk_count = max(1, min(chunk_count, 20))
+            chunk_count = max(1, min(chunk_count, 200))
         iterator.set_auto_blocks(chunk_count)
 
         self._plot_infos = []

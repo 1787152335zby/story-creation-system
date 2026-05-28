@@ -190,9 +190,10 @@ export default function ImageGenPage() {
     setSelectedScene(null)
     if (!name) return
     if (promptLocked) return
+    let finalPrompt = ''
     try {
       const result = await fetchCharacterPrompt(selectedProject, name)
-      let finalPrompt = result.prompt || ''
+      finalPrompt = result.prompt || ''
       if (result.style_decl) {
         finalPrompt = `${result.style_decl.trim()}\n\n${finalPrompt}`
       }
@@ -244,8 +245,10 @@ export default function ImageGenPage() {
           setAutoRefUrls([])
         }
       }
-    } catch {
-      setProjectPrompt('')
+    } catch (e) {
+      if (!finalPrompt || finalPrompt === '') {
+        setProjectPrompt('')
+      }
       setAutoRefUrls([])
     }
     setUseCharTemplate(false)
@@ -257,9 +260,10 @@ export default function ImageGenPage() {
     setSelectedChar(null)
     if (!name) return
     if (promptLocked) return
+    let finalPrompt = ''
     try {
       const result = await fetchScenePrompt(selectedProject, name)
-      let finalPrompt = result.prompt || ''
+      finalPrompt = result.prompt || ''
       if (result.style_decl) {
         finalPrompt = `${result.style_decl.trim()}\n\n${finalPrompt}`
       }
@@ -278,8 +282,10 @@ export default function ImageGenPage() {
           setAutoRefUrls([])
         }
       }
-    } catch {
-      setProjectPrompt('')
+    } catch (e) {
+      if (!finalPrompt || finalPrompt === '') {
+        setProjectPrompt('')
+      }
       setAutoRefUrls([])
     }
     setUseSceneTemplate(false)
@@ -576,6 +582,7 @@ export default function ImageGenPage() {
             setProjectError={setProjectError}
             setProjectGenerating={setProjectGenerating}
             setGeneratedImages={setGeneratedImages}
+            fetchProjectImages={fetchProjectImages}
             modelCap={projectCap}
           />
           </>

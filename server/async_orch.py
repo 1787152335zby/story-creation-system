@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import re
 from pathlib import Path
 
 from core.project_manager import ProjectManager
@@ -458,6 +459,24 @@ class AsyncOrchestrator:
                                 parts.append(content)
                         if parts:
                             existing_full_parts = parts
+                # 无 pending_episode 时自动扫描已存在的剧集，从中断处继续
+                if chunk_resume_ci == 0 and existing_full_parts is None and phase.split:
+                    existing_dirs = sorted(
+                        [d for d in (project.project_dir / Path(output_path).parent).iterdir()
+                         if d.is_dir() and re.search(r'第\d+集', d.name)],
+                        key=lambda d: int(re.search(r'第(\d+)集', d.name).group(1)) if re.search(r'第(\d+)集', d.name) else 0
+                    )
+                    if existing_dirs:
+                        chunk_resume_ci = len(existing_dirs)
+                        parts = []
+                        base_stem = Path(output_path).stem
+                        for d in existing_dirs:
+                            md_files = list(d.glob("*.md"))
+                            if md_files:
+                                parts.append(md_files[0].read_text(encoding="utf-8"))
+                        if parts:
+                            existing_full_parts = parts
+                        logger.info(f"自动检测到 {len(existing_dirs)} 个已有剧集，从第 {chunk_resume_ci+1} 集继续")
                 # 对于大纲阶段，即使有现有内容也不跳过，因为我们需要重新走两阶段流程
                 if not is_outline:
                     # 如果后面还有 pending_episode，当前阶段有内容就直接标记完成，不弹审核
