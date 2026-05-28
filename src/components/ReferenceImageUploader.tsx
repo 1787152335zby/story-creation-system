@@ -97,18 +97,16 @@ export default function ReferenceImageUploader({ urls = { style: [], character: 
   }, [urls, activeTab, currentUrls, onChange])
 
   return (
-    <div className="border border-dashed rounded-xl p-3 transition-colors">
-      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-        <ImagePlus className="w-3.5 h-3.5" />
+    <div className="premium-section mb-4">
+      <label className="premium-label mb-1 flex items-center gap-1.5">
+        <ImagePlus className="w-3 h-3" />
         参考图片
       </label>
 
-      <div className="flex gap-1 mb-2 flex-wrap">
+      <div className="flex gap-1 mb-2 flex-wrap premium-btn-group">
         {(Object.keys(TAB_LABELS) as RefTab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
-              activeTab === tab ? 'bg-primary/20 text-primary border border-primary/30' : 'text-muted-foreground hover:bg-muted border border-transparent'
-            }`}>
+            className={`${activeTab === tab ? 'active' : ''}`}>
             {TAB_LABELS[tab]}
             {urls[tab].length > 0 && <span className="ml-1 text-[9px] opacity-50">({urls[tab].length})</span>}
           </button>
@@ -119,13 +117,13 @@ export default function ReferenceImageUploader({ urls = { style: [], character: 
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative border border-dashed rounded-xl p-3 transition-colors ${dragOver ? 'border-primary bg-primary/5' : 'border-border/50'}`}
+        className={`relative premium-upload rounded-xl p-3 ${dragOver ? 'bg-primary/10 !border-primary/40' : ''}`}
       >
         {currentUrls.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
             {currentUrls.map((url, i) => (
               <div key={i} className="relative group w-16 h-16">
-                <img src={url} alt="" className="w-full h-full rounded object-cover bg-muted"
+                <img src={url} alt="" className="w-full h-full rounded object-cover" style={{ background: 'rgba(0,0,0,0.2)' }}
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                 <button onClick={() => handleRemoveUrl(url)}
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -139,7 +137,7 @@ export default function ReferenceImageUploader({ urls = { style: [], character: 
 
         <div className="flex items-center gap-2">
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="w-16 h-16 rounded-lg border border-dashed border-border/50 flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-border transition-colors flex-shrink-0">
+            className="w-16 h-16 rounded-lg border border-dashed" style={{ borderColor: 'rgba(255,255,255,0.08)', color: 'rgba(167, 139, 250, 0.4)' }}>
             {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImagePlus className="w-5 h-5" />}
           </button>
           <div className="flex-1 flex items-center gap-2">

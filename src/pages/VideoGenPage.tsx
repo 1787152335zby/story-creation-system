@@ -11,6 +11,35 @@ import type { ProjectInfo, EntityImage, EntityImagesMap } from '../lib/types'
 import { useToast } from '../components/Toast'
 import Starfield from '../components/Starfield'
 
+const VIDEO_BACKEND_LABELS: Record<string, { label: string; color: string }> = {
+  seedance: { label: '火山引擎 Seedance', color: 'rgba(129,140,248,0.20)' },
+  kling: { label: '可灵 Kling', color: 'rgba(74,222,128,0.18)' },
+  runway: { label: 'Runway Gen', color: 'rgba(251,191,36,0.18)' },
+  pika: { label: 'Pika', color: 'rgba(244,114,182,0.18)' },
+  luma: { label: 'Luma Dream Machine', color: 'rgba(56,189,248,0.18)' },
+  unknown: { label: '未知接口', color: 'rgba(239,68,68,0.15)' },
+}
+
+const MODEL_VIDEO_BACKEND_KEYS: [string, string][] = [
+  ['seedance', 'seedance'], ['doubao-seedance', 'seedance'],
+  ['kling', 'kling'], ['kling-v1', 'kling'], ['kling-v1-6', 'kling'],
+  ['kling-v2', 'kling'], ['kling-v2-master', 'kling'],
+  ['kling-v2-1-master', 'kling'], ['kling-v2-5-turbo', 'kling'],
+  ['kling-video-o1', 'kling'],
+  ['runway', 'runway'], ['gen3', 'runway'], ['gen3-alpha', 'runway'], ['gen4', 'runway'],
+  ['pika', 'pika'], ['pika-2', 'pika'], ['pika-2.2', 'pika'],
+  ['luma', 'luma'], ['dream-machine', 'luma'], ['ray', 'luma'], ['ray2', 'luma'],
+]
+
+function detectVideoBackend(model: string): string {
+  if (!model) return 'seedance'
+  const ml = model.toLowerCase()
+  for (const [key, bk] of MODEL_VIDEO_BACKEND_KEYS) {
+    if (ml.includes(key)) return bk
+  }
+  return 'unknown'
+}
+
 export default function VideoGenPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
@@ -31,6 +60,7 @@ export default function VideoGenPage() {
   const [videoModel, setVideoModel] = useState('')
   const [freeElapsed, setFreeElapsed] = useState(0)
   const [generateAudio, setGenerateAudio] = useState(false)
+  const [freeDuration, setFreeDuration] = useState(5)
   const [refProjects, setRefProjects] = useState<ProjectInfo[]>([])
   const [selectedRefProject, setSelectedRefProject] = useState('')
   const [refProjectImages, setRefProjectImages] = useState<EntityImagesMap>({ characters: {}, scenes: {} })
@@ -58,13 +88,14 @@ export default function VideoGenPage() {
   useEffect(() => {
     fetchProjects().then(list => {
       setProjects(list)
+      setRefProjects(list)
       const savedProject = localStorage.getItem('lastProject')
       if (savedProject && list.some(p => p.name === savedProject)) {
         setSelectedProject(savedProject)
+        setSelectedRefProject(savedProject)
         setMode('project')
       }
     })
-    fetchProjects().then(setRefProjects)
     fetchGenerationHistory().then(h => setHistoryVideos(h.videos))
     fetchActiveConfig('video').then(cfg => {
       const model = cfg?.model || ''
@@ -138,7 +169,7 @@ export default function VideoGenPage() {
     const timer = setInterval(() => setFreeElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
     try {
       const files = freeFiles.length > 0 ? freeFiles.map(f => f.file) : undefined
-      const result = await freeVideoGen(freePrompt, files, videoModel, freeResolution || undefined, undefined, generateAudio)
+      const result = await freeVideoGen(freePrompt, files, videoModel, freeResolution || undefined, freeDuration, generateAudio)
       setFreeResult(result)
     } catch (e: any) {
       setFreeResult({ error: e.message })
@@ -176,29 +207,46 @@ export default function VideoGenPage() {
           }}>
           🎬 视频生成
         </h1>
-        <p className="text-xs text-white/15 tracking-wider mb-6">图生视频 · 多图片参考 · 自由创作</p>
+        <p className="text-xs text-white/15 tracking-wider mb-4">图生视频 · 多图片参考 · 自由创作</p>
 
-        {/* Mode tabs */}
-        <div className="flex gap-2 mb-6">
-          <button onClick={() => setMode('free')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
-            style={mode === 'free' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            ✏️ 自由创作
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <button onClick={() => setMode('free')}
+            className={`p-4 rounded-xl text-left transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${mode === 'free' ? 'selected' : ''}`}
+            style={{
+              background: mode === 'free' ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${mode === 'free' ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.06)'}`,
+              boxShadow: mode === 'free' ? '0 0 20px rgba(167,139,250,0.08)' : 'none',
+            }}>
+            <div className="relative z-[1]">
+              <div className="text-2xl mb-2">✏️</div>
+              <div className="font-semibold text-sm mb-0.5" style={{ color: mode === 'free' ? 'rgba(220,210,255,0.95)' : 'rgba(255,255,255,0.55)' }}>自由创作</div>
+              <div className="text-[10px]" style={{ color: mode === 'free' ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.2)' }}>上传参考图片，AI 生成视频</div>
+            </div>
           </button>
-          <button onClick={() => setMode('project')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
-            style={mode === 'project' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            📂 项目模式
+          <button onClick={() => setMode('project')}
+            className={`p-4 rounded-xl text-left transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${mode === 'project' ? 'selected' : ''}`}
+            style={{
+              background: mode === 'project' ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${mode === 'project' ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.06)'}`,
+              boxShadow: mode === 'project' ? '0 0 20px rgba(167,139,250,0.08)' : 'none',
+            }}>
+            <div className="relative z-[1]">
+              <div className="text-2xl mb-2">📂</div>
+              <div className="font-semibold text-sm mb-0.5" style={{ color: mode === 'project' ? 'rgba(220,210,255,0.95)' : 'rgba(255,255,255,0.55)' }}>项目模式</div>
+              <div className="text-[10px]" style={{ color: mode === 'project' ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.2)' }}>为项目中的角色/场景生成视频</div>
+            </div>
           </button>
         </div>
 
         {mode === 'free' ? (
           <>
-            <div className="rounded-2xl p-6 mb-6 glass-surface-visible border border-white/[0.08] glow-border">
+            <div className="rounded-2xl p-6 mb-6 premium-panel">
               {/* Reference images */}
-              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-2 block">参考图片（可上传多张）</label>
-              <div className="border-2 border-dashed border-white/[0.10] rounded-xl p-6 text-center cursor-pointer hover:border-[rgba(129,140,248,0.3)] transition-colors mb-4"
+              <label className="premium-label">参考图片（可上传多张）</label>
+              <div className="premium-upload rounded-xl p-6 text-center cursor-pointer mb-4"
                 onClick={() => fileInputRef.current?.click()}>
-                <Upload className="w-8 h-8 mx-auto mb-2 text-white/55" />
-                <p className="text-sm text-white/55">点击上传参考图片（支持多选）</p>
+                <Upload className="w-8 h-8 mx-auto mb-2" style={{ color: 'rgba(167, 139, 250, 0.5)' }} />
+                <p className="text-sm" style={{ color: 'rgba(255, 255, 255, 0.4)' }}>点击上传参考图片（支持多选）</p>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
               </div>
 
@@ -238,37 +286,49 @@ export default function VideoGenPage() {
               />
 
               {/* Prompt */}
-              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-2 block">动作描述</label>
+              <div className="premium-divider" />
+              <label className="premium-label">动作描述</label>
               <textarea ref={freePromptRef} value={freePrompt} onChange={e => setFreePrompt(e.target.value)}
-                placeholder="例如：角色缓缓转身，风吹动衣角，背景的云层在流动..." className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-4 py-3 min-h-[6rem] resize-none text-sm mb-4 input-field" />
+                placeholder="例如：角色缓缓转身，风吹动衣角，背景的云层在流动..." className="w-full premium-input rounded-xl px-4 py-3 min-h-[6rem] resize-none text-sm mb-4" />
 
               {/* Resolution + Model + Duration */}
               <div className="grid grid-cols-4 gap-4 mb-4">
                 <div>
-                  <label className="text-xs text-white/55 block mb-1">模型</label>
+                  <label className="premium-label" style={{ fontSize: '0.625rem' }}>模型</label>
                   <ModelSelector type="video" value={videoModel} onChange={setVideoModel} />
+                  {(() => {
+                    const bk = detectVideoBackend(videoModel)
+                    const info = VIDEO_BACKEND_LABELS[bk] || VIDEO_BACKEND_LABELS.unknown
+                    return (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <span className="inline-block px-2 py-0.5 rounded text-[10px]" style={{ background: info.color, color: bk === 'unknown' ? 'rgba(239,68,68,0.85)' : 'rgba(255,255,255,0.65)' }}>
+                          调用: {info.label}
+                        </span>
+                        {bk === 'unknown' && (
+                          <span className="text-[10px] italic" style={{ color: 'rgba(239,68,68,0.7)' }}>请确认该模型是否支持视频生成</span>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
                 <div>
-                  <label className="text-xs text-white/55 block mb-1">比例</label>
+                  <label className="premium-label" style={{ fontSize: '0.625rem' }}>比例</label>
                   <select value={selectedRatio} onChange={e => { const rs = ratioGroups[e.target.value]; setSelectedRatio(e.target.value); if (rs?.length) setFreeResolution(rs[0]) }}
-                    className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
+                    className="w-full premium-select rounded-xl px-3 py-2.5 text-sm">
                     {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-white/55 block mb-1">分辨率</label>
-                  <select value={freeResolution} onChange={e => setFreeResolution(e.target.value)} className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
+                  <label className="premium-label" style={{ fontSize: '0.625rem' }}>分辨率</label>
+                  <select value={freeResolution} onChange={e => setFreeResolution(e.target.value)} className="w-full premium-select rounded-xl px-3 py-2.5 text-sm">
                     {(ratioGroups[selectedRatio] || resolutions).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-white/55 block mb-1">时长</label>
-                  <select className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-3 py-2.5 text-sm input-field">
+                  <label className="premium-label" style={{ fontSize: '0.625rem' }}>时长</label>
+                  <select value={freeDuration} onChange={e => setFreeDuration(Number(e.target.value))} className="w-full premium-select rounded-xl px-3 py-2.5 text-sm">
                     <option value="5">5 秒</option>
                     <option value="10">10 秒</option>
-                    <option value="15">15 秒</option>
-                    <option value="30">30 秒</option>
-                    <option value="60">60 秒</option>
                   </select>
                 </div>
               </div>
@@ -291,7 +351,7 @@ export default function VideoGenPage() {
             </div>
 
             {freeResult && (
-              <div className="rounded-2xl p-5 card-glow glass-card">
+              <div className="rounded-2xl p-5 card-glow premium-panel premium-glow-bottom">
                 <h3 className="font-semibold text-sm mb-3">生成结果</h3>
                 {freeResult.error ? (
                   <div className="p-4 bg-red-500/10 rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -313,11 +373,11 @@ export default function VideoGenPage() {
             )}
 
             {historyVideos.length > 0 && !freeResult && (
-              <div className="rounded-2xl p-5 card-glow glass-card">
+              <div className="rounded-2xl p-5 card-glow premium-panel premium-glow-bottom">
                 <h3 className="font-semibold text-sm mb-4">📂 历史记录</h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {historyVideos.map((v, i) => (
-                    <div key={i} className="rounded-xl overflow-hidden group relative" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div key={i} className="premium-grid-item">
                       <video src={v.url} className="w-full h-40 object-contain bg-white" />
                     </div>
                   ))}
@@ -327,9 +387,9 @@ export default function VideoGenPage() {
           </>
         ) : (
           <>
-            <div className="rounded-2xl p-5 mb-6 card-glow glass-card">
-              <label className="text-xs font-medium text-white/55 uppercase tracking-wider mb-3 block">选择项目</label>
-              <select value={selectedProject} onChange={e => { const v = e.target.value; setSelectedProject(v); localStorage.setItem('lastProject', v) }} className="w-full bg-white/[0.04] border border-white/[0.10] rounded-xl px-4 py-3 text-sm input-field">
+            <div className="rounded-2xl p-5 mb-6 card-glow premium-panel premium-glow-bottom">
+              <label className="premium-label">选择项目</label>
+              <select value={selectedProject} onChange={e => { const v = e.target.value; setSelectedProject(v); localStorage.setItem('lastProject', v) }} className="w-full premium-select rounded-xl px-4 py-3 text-sm">
                 <option value="">-- 请选择项目 --</option>
                 {projects.map(p => (<option key={p.name} value={p.name}>{p.name}</option>))}
               </select>

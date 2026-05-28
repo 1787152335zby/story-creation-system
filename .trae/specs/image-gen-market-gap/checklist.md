@@ -1,0 +1,30 @@
+- [x] `_next_version` 使用 `threading.Lock()` 保护
+- [x] 生成结果列表使用 `key={img.url || img.name}` 而非 `key={i}`
+- [x] 历史列表使用 `key={img.url}` 而非 `key={i}`
+- [x] 参考图列表使用 `key={url}` 而非 `key={i}`
+- [x] 元数据 JSON 包含 `count` 字段
+- [x] `handleRemix` 恢复 `freeCount`
+- [x] 场景列表按 is_base 分组显示（变体作为子节点）
+- [x] 场景列表不再用 name 去重
+- [x] ImagePreview 支持滚轮缩放（0.5x~5x）
+- [x] ImagePreview 支持拖拽平移
+- [x] ImagePreview 有加载中骨架屏
+- [x] ImagePreview 图片加载失败有错误提示
+- [x] ImagePreview 工具栏有 Upscale 按钮（2x Pillow LANCZOS 放大）
+- [x] 自由模式表单有 Seed 输入框
+- [x] Seed 值通过 extra_params.seed 传递到后端
+- [x] 自由模式表单有风格预设选择器（8 种预设）
+- [x] 预设自动追加 prompt_suffix 和合并 style_params
+- [x] 独立历史页面（/history）含全部/自由/项目/视频四个 Tab
+- [x] 历史页面有画同款/下载/删除/详情操作
+- [x] 历史页面画同款跳转到生图页面自动填充参数
+- [x] 前端计时器显示生成耗时
+- [x] 独立历史路由已添加到 App.tsx
+- [x] 死代码路径已清理或标记废弃
+- [x] CharacterInfo/SceneInfo 接口已定义
+- [x] generatedImages 状态使用 EntityImagesMap 类型
+- [x] 所有 any 类型已替换（characters/scenes 等）
+- [x] resolutions/ratioGroups/selectedRatio 拆分为 free/project 独立
+- [x] Gemini 参考图编码移到循环外部
+- [x] frontend `npm run build` 通过
+- [x] backend `py_compile` 通过

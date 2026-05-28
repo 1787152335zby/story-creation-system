@@ -72,15 +72,31 @@ class AgentBase:
                 break
             yield chunk
 
+    def _extract_foreshadowing(self, content: str) -> str:
+        """从前文提取未解决的伏笔、悬疑和待回收线索"""
+        extraction_prompt = (
+            "请从以下故事大纲/剧情中提取【尚未揭示或尚未解决的伏笔/悬疑/待回收线索】：\n"
+            "1. 只提取在已有内容中提到了、但在已有内容中还没有揭示真相的线索\n"
+            "2. 每条30字以内，最多5条\n"
+            "3. 如果没有尚未解决的伏笔，请回复「无」\n\n"
+            f"{content}"
+        )
+        try:
+            result = self.llm.chat(extraction_prompt, "", temperature=0.3, max_tokens=500)
+            return result.strip()
+        except Exception:
+            return ""
+
     def call_llm_stream_with_continuation(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_rounds: int = 8, end_markers: list = None, continuation_prompt: str = ""):
-        """流式调用 LLM，支持自定义结束标记检测。
+        """流式调用 LLM，支持自定义结束标记检测、自动续写和伏笔追踪。
 
         Args:
             end_markers: 自定义结束标记列表，如果检测到这些标记则立即停止输出
-            continuation_prompt: 当遇到自定义结束标记时的续写提示，为空时不自动续写
+            continuation_prompt: 当遇到续写时的附加提示词，为空时自动注入上下文和伏笔续写
         """
         full_output = ""
         custom_end_markers = end_markers or []
+        foreshadowing = ""
 
         if custom_end_markers:
             all_end_markers = custom_end_markers
@@ -94,8 +110,28 @@ class AgentBase:
                 break
 
             current_system = system_prompt
-            if attempt > 0 and continuation_prompt:
-                current_system = system_prompt + continuation_prompt
+            if attempt > 0:
+                if not foreshadowing and not continuation_prompt:
+                    foreshadowing = self._extract_foreshadowing(full_output)
+
+                foreshadowing_block = ""
+                if foreshadowing and foreshadowing != "无":
+                    foreshadowing_block = (
+                        f"\n\n【伏笔清单 — 以下线索在后续内容中必须交代】\n"
+                        f"{foreshadowing}\n"
+                    )
+
+                context_injection = (
+                    f"\n\n---[续写指示]---\n"
+                    f"你已生成了部分内容，最后已写到的部分如下：\n"
+                    f"{full_output[-3000:]}\n\n"
+                    f"{foreshadowing_block}"
+                    f"请直接从上面断开的地方继续输出后续内容。"
+                    f"【不要】重复已输出过的剧集或内容。"
+                    f"请在后续内容中酌情回收上述伏笔。"
+                    f"如果已全部完成，输出【全片完】。"
+                )
+                current_system = system_prompt + (continuation_prompt or context_injection)
 
             for chunk in self.llm.backend.chat_stream(current_system, "", temperature):
                 if found_end:

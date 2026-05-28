@@ -1,0 +1,13 @@
+- [x] 自由模式生成图片后，`generated/_meta/` 目录存在对应的 `.json` 元数据文件
+- [x] 项目模式生成图片后，元数据包含 project_name、character_names 等字段
+- [x] `GET /api/generated-history` 返回的每条记录附带 prompt、model、size 等元数据
+- [x] `GET /api/generated-history/{filename}` 返回该文件的完整元数据
+- [x] `POST /api/upload-reference` 上传图片成功并返回可用 URL
+- [x] 自由模式表单有参考图上传区域（拖拽/选择/URL）
+- [x] 参考图上传后显示缩略图预览，可删除
+- [x] 生成请求携带 reference_urls 参数
+- [x] 历史卡片显示 prompt 摘要（前 40 字）、模型名称、尺寸、相对时间
+- [x] 历史卡片有「画同款」按钮
+- [x] 点击「画同款」后 prompt、model、size、reference_urls 正确回填到表单
+- [x] 回填的参考图在预览区正常显示
+- [x] 项目模式历史「画同款」切换到自由模式并填充参数

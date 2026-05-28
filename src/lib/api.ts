@@ -73,6 +73,19 @@ export async function fetchProjects(): Promise<ProjectInfo[]> {
   return res.json()
 }
 
+export function getModelCapability(modelId: string): { max_ref_images: number; supports_img2img: boolean } {
+  const ml = modelId.toLowerCase()
+  let maxRefImages = 1
+  if (['gemini', 'banana', 'gpt-image', 'qwen-image', 'flux'].some(k => ml.includes(k))) {
+    maxRefImages = 3
+  } else if (['dall-e', 'midjourney', 'mj_'].some(k => ml.includes(k))) {
+    maxRefImages = 2
+  } else if (ml.includes('seedream')) {
+    maxRefImages = 1
+  }
+  return { max_ref_images: maxRefImages, supports_img2img: true }
+}
+
 export async function fetchProject(name: string): Promise<ProjectInfo> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}`)
   if (!res.ok) throw new Error('Project not found')
@@ -228,6 +241,12 @@ export async function generateSelectionPrompt(name: string, characterNames: stri
 export async function fetchVideoClips(name: string): Promise<{ clips: { name: string; file: string }[]; final: { name: string; file: string } | null }> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/video-clips`)
   if (!res.ok) return { clips: [], final: null }
+  return res.json()
+}
+
+export async function fetchVideoShotStatus(name: string): Promise<{ shotStatuses: Record<number, string>; shotVideoUrls: Record<number, string> }> {
+  const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/video/shot-status`)
+  if (!res.ok) return { shotStatuses: {}, shotVideoUrls: {} }
   return res.json()
 }
 
@@ -688,5 +707,27 @@ export async function fetchProjectAssetLibrary(projectName: string): Promise<imp
 export async function fetchPropsSummary(projectName: string): Promise<{ props: { name: string; shared_by: string[]; appearance: string; style: string }[] }> {
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectName)}/props-summary`)
   if (!res.ok) return { props: [] }
+  return res.json()
+}
+
+export async function modifyImage(params: {
+  project_name?: string
+  prompt: string
+  negative_prompt?: string
+  size?: string
+  model?: string
+  strength?: number
+  reference_images: string[]
+  style_references?: Record<string, string[]>
+}) {
+  const res = await fetch(`${BASE}/assets/modify-free`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: '请求失败' }))
+    throw new Error(err.detail || '请求失败')
+  }
   return res.json()
 }

@@ -27,9 +27,13 @@ class VideoBackend(ABC):
 def create_video_backend(backend_name: str = "seedance") -> VideoBackend:
     backends = {
         "seedance": "SeedanceBackend",
+        "kling": "KlingBackend",
+        "runway": "RunwayBackend",
+        "pika": "PikaBackend",
+        "luma": "LumaBackend",
     }
     if backend_name not in backends:
-        raise ValueError(f"Unknown video backend: {backend_name}")
+        raise ValueError(f"Unknown video backend: {backend_name}, available: {', '.join(backends.keys())}")
     import importlib
     module = importlib.import_module(f"tools.video_api_{backend_name}")
     cls = getattr(module, backends[backend_name])

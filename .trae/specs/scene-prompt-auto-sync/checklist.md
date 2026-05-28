@@ -1,0 +1,18 @@
+- [x] `POST /projects/{name}/scene-prompt` 端点存在且正确返回
+- [x] 基础场景返回 prompt 和空 base_scene
+- [x] 变体场景返回 prompt 和对应 base_scene 名称
+- [x] `GET /projects/{name}/scene-confirmed-images/{name}` 端点存在
+- [x] 前端 `fetchScenePrompt` API 函数存在
+- [x] 前端 `fetchSceneConfirmedImages` API 函数存在
+- [x] handleSceneSelect 使用新 API
+- [x] 变体场景自动加载基础场景已确认图作为参考
+- [x] projectImageGen 成功后自动写入 _confirmed 标记
+- [x] 多版本累积（不覆盖旧版本）
+- [x] `GET /projects/{name}/asset-library` 端点存在
+- [x] generate_project_shot 从 generated/ 路径读取
+- [x] VideoProjectPanel 有自动匹配参考图区域
+- [x] 自动匹配区按角色/场景名展示缩略图
+- [x] 自动匹配区下方有手动选择/历史版本浏览区域
+- [x] 高级参数面板可正常展开
+- [x] frontend `npm run build` 通过
+- [x] backend `py_compile` 通过

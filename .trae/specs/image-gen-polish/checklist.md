@@ -1,0 +1,14 @@
+- [x] 项目模式表单有预设选择器（与自由模式相同的 presets）
+- [x] 项目模式选中预设后 prompt 追加 prompt_suffix
+- [x] 项目模式选中预设后 style_params 合并到 extra_params
+- [x] AdvancedParamsPanel 组件已创建
+- [x] 自由模式表单有高级参数面板（cfg_scale/style/quality）
+- [x] 自由模式 Seed 输入框已移入高级参数面板
+- [x] 项目模式表单有高级参数面板
+- [x] 每个参数标注仅对哪些模型生效
+- [x] 后端有 `/api/image-gen/cancel` 端点
+- [x] 后端生成过程中有取消检查点
+- [x] 前端生成按钮在生成中变为 `[× 取消]`
+- [x] 点击取消后生成停止
+- [x] frontend `npm run build` 通过
+- [x] backend `py_compile` 通过

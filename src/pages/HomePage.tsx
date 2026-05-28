@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
+import Starfield from '../components/Starfield'
 import { useNavigate } from 'react-router-dom'
-import { Sparkles, ArrowRight, Search, Plus, Loader2, Pencil, Check, X, FolderOpen, Trash2 } from 'lucide-react'
+import { Sparkles, ArrowRight, Search, Plus, Loader2, Pencil, Check, X, FolderOpen, Trash2, Download } from 'lucide-react'
 import ConfirmModal from '../components/ConfirmModal'
 import { fetchProjects, deleteProject, openProjectFolder, renameProject, fetchProjectImages, fetchVideoClips } from '../lib/api'
 import { useToast } from '../components/Toast'
@@ -16,6 +17,10 @@ export default function HomePage() {
   const [searchText, setSearchText] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState('')
+  const [exportTarget, setExportTarget] = useState<string | null>(null)
+  const [exportPhases, setExportPhases] = useState<{dir: string; label: string; has_content: boolean}[]>([])
+  const [selectedPhases, setSelectedPhases] = useState<Set<string>>(new Set())
+  const [loadingPhases, setLoadingPhases] = useState(false)
 
   const filteredProjects = useMemo(() => {
     if (!searchText.trim()) return projects
@@ -48,7 +53,9 @@ export default function HomePage() {
   }).length
 
   return (
-    <div className="px-6 py-16 max-w-4xl mx-auto">
+    <div className="min-h-screen relative overflow-hidden">
+      <Starfield />
+      <div className="px-8 py-16 max-w-6xl mx-auto relative z-10">
       {/* Hero */}
       <div className="text-center mb-20 animate-fade-in-up">
         <h1 className="text-[clamp(36px,7vw,64px)] font-black tracking-[-0.04em] leading-none mb-4"
@@ -201,6 +208,14 @@ export default function HomePage() {
                       className="p-1.5 rounded-lg hover:bg-white/[0.03] text-white/10" title="重命名"><Pencil className="w-3 h-3" /></button>
                     <button onClick={e => { e.stopPropagation(); openProjectFolder(p.name) }}
                       className="p-1.5 rounded-lg hover:bg-white/[0.03] text-white/10" title="打开文件夹"><FolderOpen className="w-3 h-3" /></button>
+                    <button onClick={e => { e.stopPropagation(); setExportTarget(p.name); setSelectedPhases(new Set()); setLoadingPhases(true);
+                      fetch(`/api/projects/${encodeURIComponent(p.name)}/phases`).then(r => r.json()).then(d => {
+                        setExportPhases(d.phases || []);
+                        setSelectedPhases(new Set((d.phases || []).map((ph: any) => ph.dir)));
+                        setLoadingPhases(false);
+                      }).catch(() => setLoadingPhases(false))
+                    }}
+                      className="p-1.5 rounded-lg hover:bg-blue-500/[0.08] text-white/10 hover:text-blue-400/70" title="导出"><Download className="w-3 h-3" /></button>
                     <button onClick={e => { e.stopPropagation(); setDeleteTarget(p.name) }}
                       className="p-1.5 rounded-lg hover:bg-red-500/[0.06] text-white/10 hover:text-red-400/60" title="删除"><Trash2 className="w-3 h-3" /></button>
                   </div>
@@ -216,6 +231,61 @@ export default function HomePage() {
           onConfirm={async () => { await deleteProject(deleteTarget); setDeleteTarget(null); toast('已删除', 'success'); load() }}
           onCancel={() => setDeleteTarget(null)} />
       )}
+
+      {exportTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={() => setExportTarget(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative z-10 w-[380px] max-h-[80vh] rounded-2xl p-6 overflow-y-auto"
+            style={{ background: 'rgba(18,18,24,0.96)', border: '1px solid rgba(255,255,255,0.10)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-white/80">导出「{exportTarget}」</h3>
+              <button onClick={() => setExportTarget(null)} className="p-1 rounded-lg hover:bg-white/[0.04] text-white/30"><X className="w-4 h-4" /></button>
+            </div>
+            {loadingPhases ? (
+              <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-white/20" /></div>
+            ) : exportPhases.length === 0 ? (
+              <p className="text-xs text-white/30 py-4">该项目暂无内容可导出</p>
+            ) : (
+              <>
+                <p className="text-[11px] text-white/30 mb-3">勾选要导出的阶段，将合并为单个 Word 文件</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <button className="text-[10px] px-2 py-1 rounded text-blue-400/70 hover:bg-blue-400/[0.06] transition-all"
+                    onClick={() => setSelectedPhases(new Set(exportPhases.map(p => p.dir)))}>全选</button>
+                  <span className="text-white/10">·</span>
+                  <button className="text-[10px] px-2 py-1 rounded text-white/25 hover:bg-white/[0.03] transition-all"
+                    onClick={() => setSelectedPhases(new Set())}>取消全选</button>
+                </div>
+                <div className="space-y-1 mb-5">
+                  {exportPhases.map(ph => (
+                    <label key={ph.dir} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${selectedPhases.has(ph.dir) ? 'bg-blue-500/[0.08]' : 'hover:bg-white/[0.02]'}`}>
+                      <div className={`w-4 h-4 rounded flex items-center justify-center border flex-shrink-0 transition-all ${selectedPhases.has(ph.dir) ? 'bg-blue-500/80 border-blue-500/60' : 'border-white/[0.12]'}`}>
+                        {selectedPhases.has(ph.dir) && <Check className="w-2.5 h-2.5 text-white" />}
+                      </div>
+                      <input type="checkbox" className="hidden" checked={selectedPhases.has(ph.dir)}
+                        onChange={() => {
+                          const next = new Set(selectedPhases);
+                          if (next.has(ph.dir)) next.delete(ph.dir); else next.add(ph.dir);
+                          setSelectedPhases(next);
+                        }} />
+                      <span className="text-xs text-white/60 flex-1">{ph.label}</span>
+                      {!ph.has_content && <span className="text-[10px] text-white/15">空</span>}
+                    </label>
+                  ))}
+                </div>
+                <a href={`/api/projects/${encodeURIComponent(exportTarget)}/export-batch?phases=${encodeURIComponent([...selectedPhases].join(','))}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-medium transition-all ${selectedPhases.size === 0 ? 'pointer-events-none opacity-30' : ''}`}
+                  style={{ background: 'rgba(59,130,246,0.20)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
+                  onClick={() => { setTimeout(() => setExportTarget(null), 500) }}>
+                  <Download className="w-3.5 h-3.5" /> 导出 {selectedPhases.size} 个阶段
+                </a>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
     </div>
   )
 }

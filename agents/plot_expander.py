@@ -194,17 +194,21 @@ class PlotExpander(AgentBase):
     def _resolve_auto_chunks(self, iterator, template, outline, style_context,
                                writing_style_name, screen_aspect_name,
                                story_type_name, style, feedback):
-        count_prompt = (
-            f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
-            f"考虑故事的长度和复杂度。只输出一个整数，不要其他文字。\n\n"
-            f"{outline[:3000]}"
-        )
-        count_text = ""
-        for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
-            count_text += token
-        nums = re.findall(r'\d+', count_text)
-        chunk_count = int(nums[0]) if nums else 3
-        chunk_count = max(1, min(chunk_count, 20))
+        if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
+            chunk_count = int(style.episode_count)
+            chunk_count = max(1, min(chunk_count, 20))
+        else:
+            count_prompt = (
+                f"以下是一个故事大纲。请判断这个故事应该分为几集/几章。"
+                f"考虑故事的长度和复杂度。只输出一个整数，不要其他文字。\n\n"
+                f"{outline[:3000]}"
+            )
+            count_text = ""
+            for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
+                count_text += token
+            nums = re.findall(r'\d+', count_text)
+            chunk_count = int(nums[0]) if nums else 3
+            chunk_count = max(1, min(chunk_count, 20))
         iterator.set_auto_blocks(chunk_count, outline=outline)
 
         for ctx in iterator:

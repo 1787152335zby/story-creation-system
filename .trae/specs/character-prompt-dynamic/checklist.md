@@ -1,0 +1,13 @@
+- [x] `POST /projects/{name}/character-prompt` 端点存在且正确返回
+- [x] 基础角色返回 prompt 和空 base_character
+- [x] 变体角色返回 prompt 和对应的 base_character 名称
+- [x] 提示词包含风格声明（项目 style_type）
+- [x] 基础角色提示词以「纯白背景，角色居中，全身照」结尾
+- [x] `GET /projects/{name}/character-confirmed-images/{name}` 端点存在
+- [x] 后端 py_compile 通过
+- [x] 前端 `fetchCharacterPrompt` API 函数存在
+- [x] 前端 `fetchCharacterConfirmedImages` API 函数存在
+- [x] handleCharSelect 对新 API 的调用正确
+- [x] 变体角色自动加载基础角色的已确认图片作为参考图
+- [x] PromptFactory 自动检测并拆分服装变化为变体 JSON 文件
+- [x] 前端 npm run build 通过

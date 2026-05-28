@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react'
+﻿import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Play, Check, Pencil, X, Loader2, Settings, Sparkles, RefreshCw, ArrowLeft, Zap, ChevronRight } from 'lucide-react'
+import Starfield from '../components/Starfield'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { fetchProject, fetchPhaseContent, savePhaseContent, openProjectFolder, saveProjectTemplate, updateProjectConfig } from '../lib/api'
 import TemplateModal from '../components/TemplateModal'
@@ -110,6 +111,10 @@ export default function Workspace() {
         connect(name)
         setPendingContinue(true)
       } else if (config.pending_episode && typeof config.pending_episode.phase_index === 'number') {
+        setStarted(true)
+        connect(name)
+        setPendingContinue(true)
+      } else if (typeof config._version_selected === 'string') {
         setStarted(true)
         connect(name)
         setPendingContinue(true)
@@ -324,8 +329,8 @@ export default function Workspace() {
           art_style: projectConfig.art_style || '',
           screen_aspect: projectConfig.screen_aspect || '',
           script_style: projectConfig.script_style || '',
-          duration_mode: '1', episode_count: '', episode_duration: '',
-          custom_requirements: '', visual_reference: projectConfig.visual_reference || '',
+          duration_mode: projectConfig.duration_mode || '', episode_count: projectConfig.episode_count || '', episode_duration: projectConfig.episode_duration || '',
+          custom_requirements: projectConfig.custom_requirements || '', visual_reference: projectConfig.visual_reference || '',
           action_reference: projectConfig.action_reference || '',
         },
       })
@@ -428,10 +433,7 @@ export default function Workspace() {
 
   return (
     <div className="flex h-screen relative overflow-hidden">
-      {/* Ambient bg */}
-      <div className="fixed inset-0 pointer-events-none opacity-10">
-        <div className="absolute top-0 left-1/4 w-72 h-72 rounded-full" style={{ background: 'radial-gradient(circle, hsl(var(--primary)), transparent 70%)' }} />
-      </div>
+      <Starfield />
 
       <PhaseTimeline
         name={name || ''}
@@ -464,15 +466,21 @@ export default function Workspace() {
       />
 
       {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden relative z-10" style={{ background: 'rgba(255,255,255,0.02)' }}>
+      <main className="flex-1 flex flex-col overflow-hidden relative z-10 premium-panel premium-panel-rich" style={{ borderRadius: 0, borderLeft: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* Decorative layers matching homepage cards */}
+        <div className="wp-border" />
+        <div className="wp-sweep" />
+        <div className="wp-bottom-glow" />
         {allDone && selectedPhase < 0 && !awaitingApproval && !awaitingEpisodeApproval && !awaitingProceed ? (
-          <div className="flex-1 flex items-center justify-center animate-fade-in">
+          <div className="flex-1 flex items-center justify-center" style={{ animation: 'celebrate-fade-in 0.6s ease forwards' }}>
             <div className="text-center">
-              <div className="w-20 h-20 mx-auto mb-4 rounded-3xl flex items-center justify-center animate-float"
-                style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.20), rgba(52,211,153,0.15))' }}>
+              <div className="w-20 h-20 mx-auto mb-4 rounded-3xl flex items-center justify-center" style={{ animation: 'celebrate-float 3s ease-in-out infinite', background: 'linear-gradient(135deg, rgba(74,222,128,0.20), rgba(52,211,153,0.15))' }}>
                 <Sparkles className="w-8 h-8" style={{ color: 'rgba(74,222,128,0.90)' }} />
               </div>
-              <h2 className="text-xl font-bold mb-1" style={{ color: 'rgba(74,222,128,0.95)' }}>完成所有任务！</h2>
+              <h2 className="text-xl font-bold mb-1" style={{
+                background: 'linear-gradient(135deg, rgba(74,222,128,0.95), rgba(52,211,153,0.85))',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+              }}>完成所有任务！</h2>
               <p className="text-sm mb-6" style={{ color: 'rgba(255,255,255,0.55)' }}>{projectConfig?.style_type === '4' ? '小说创作已完成' : '提示词已生成完毕，可前往智能生图页面使用项目模式生成图片'}</p>
               <div className="flex items-center justify-center gap-3 flex-wrap">
                 <button onClick={() => navigate('/home')} className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-medium transition-all"
@@ -507,6 +515,16 @@ export default function Workspace() {
                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)' }}
                   >
                     📥 导出 Markdown
+                  </a>
+                )}
+                {currentPhase >= 0 && PHASE_DIRS[currentPhase] && (
+                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[currentPhase]}/export-docx`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium transition-all"
+                    style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.25)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.15)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.30)' }}
+                  >
+                    📄 导出 Word
                   </a>
                 )}
               </div>
@@ -561,7 +579,7 @@ export default function Workspace() {
         ) : showStream ? (
           <>
             <div className="px-8 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-              <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+              <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.80)' }}>
                   <span>{PHASE_ICONS[currentPhase] || '📝'}</span>
                   <span className="font-medium">{getPhaseNames(projectConfig?.style_type)[currentPhase] || '生成中...'}</span>
@@ -583,8 +601,8 @@ export default function Workspace() {
                 </div>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-8" style={{ opacity: 1 }}>
-              <div className="max-w-3xl mx-auto">
+            <div className="flex-1 overflow-y-auto p-10" style={{ opacity: 1 }}>
+              <div className="max-w-5xl mx-auto premium-inset p-6">
                 {streamContent.length > 10 && !streamDone && (
                   <div className="mb-3 text-xs pl-3 py-1" style={{ color: 'rgba(255,255,255,0.55)', borderLeft: '2px solid rgba(255,255,255,0.25)' }}>
                     AI 正在逐字生成内容... 已耗时 {formatTime(elapsedSeconds)}
@@ -607,8 +625,8 @@ export default function Workspace() {
               </div>
             </div>
              {awaitingVersion && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto">
                   <p className="text-sm font-medium mb-4" style={{ color: 'rgba(255,255,255,0.85)' }}>🎯 方向卡已生成，请选择版本：</p>
                   {showMixInput ? (
                     <div className="space-y-3">
@@ -649,9 +667,9 @@ export default function Workspace() {
               </div>
             )}
             {awaitingApproval && !isComplete && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
                 {showFeedback ? (
-                  <div className="max-w-3xl mx-auto space-y-3">
+                  <div className="max-w-5xl mx-auto space-y-3">
                     <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={feedbackText} onChange={e => setFeedbackText(e.target.value)} autoFocus />
                     <div className="flex gap-2">
                       <button onClick={handleRevise} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium"><Pencil className="w-4 h-4 inline mr-1" />提交修改</button>
@@ -659,12 +677,15 @@ export default function Workspace() {
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-3xl mx-auto flex items-center gap-2">
+                  <div className="max-w-5xl mx-auto flex items-center gap-2">
                     <button onClick={handleApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
-                      style={{ background: 'hsl(150, 60%, 50%)', color: 'white' }}>
+                      style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                       <Check className="w-4 h-4" /> 通过
                     </button>
-                    <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                    <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                      style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                       <Pencil className="w-4 h-4" /> 修改
                     </button>
                     <button onClick={async () => {
@@ -679,23 +700,42 @@ export default function Workspace() {
                         }
                         setEditingStream(false)
                       }
-                    }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                    }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                      style={{ color: 'rgba(255,255,255,0.5)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}>
                       <Pencil className="w-4 h-4" /> {editingStream ? '完成编辑' : '编辑'}
                     </button>
                   </div>
                 )}
               </div>
             )}
+            {awaitingApproval && !awaitingEpisodeApproval && (
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto flex items-center gap-2">
+                  <button onClick={handleApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
+                    <Check className="w-4 h-4" /> 通过
+                  </button>
+                  <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                    style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
+                    <Pencil className="w-4 h-4" /> 修改
+                  </button>
+                </div>
+              </div>
+            )}
             {awaitingProceed && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-green-400" />
                     <span className="text-green-400 font-medium">已完成确认</span>
                     <span className="text-muted-foreground">— 准备好后可继续下一步</span>
                   </div>
-                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
-                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                  <button onClick={handleProceed} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                     <Play className="w-4 h-4" /> 继续进行下一步
                   </button>
                 </div>
@@ -703,19 +743,22 @@ export default function Workspace() {
             )}
             {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && !awaitingEpisodeApproval && pausedPhaseIndex === null && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
-                <div className="max-w-3xl mx-auto flex items-center justify-between">
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">内容已生成完毕</p>
                   <button onClick={() => { setViewContent(streamContent); setSelectedPhase(currentPhase); setSuppressStream(true) }}
-                     className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
+                     className="px-4 py-2 rounded-xl text-xs transition-all"
+                     style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                     onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                     onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                     查看内容
                   </button>
                 </div>
               </div>
             )}
             {awaitingEpisodeApproval && currentEpisode && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
                 {showEpisodeFeedback ? (
-                  <div className="max-w-3xl mx-auto space-y-3">
+                  <div className="max-w-5xl mx-auto space-y-3">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
                       <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
                       <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
@@ -725,11 +768,14 @@ export default function Workspace() {
                       <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
                         <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
                       </button>
-                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-3xl mx-auto">
+                  <div className="max-w-5xl mx-auto">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
@@ -742,7 +788,10 @@ export default function Workspace() {
                       <button onClick={episodeApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all btn-gradient">
                         <ChevronRight className="w-4 h-4" />{currentEpisode.chunk_index + 1 < currentEpisode.total_chunks ? ' 继续下一集' : ' 完成本阶段'}
                       </button>
-                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                         <Pencil className="w-4 h-4" /> 修改
                       </button>
                       <button onClick={async () => {
@@ -758,7 +807,10 @@ export default function Workspace() {
                           }
                           setEditingEpisode(false)
                         }
-                      }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                      }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                        style={{ color: 'rgba(255,255,255,0.5)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}>
                         <Pencil className="w-4 h-4" /> {editingEpisode ? '完成编辑' : '编辑'}
                       </button>
                     </div>
@@ -768,7 +820,7 @@ export default function Workspace() {
             )}
             {contentWarnings.length > 0 && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
-                <div className="max-w-3xl mx-auto">
+                <div className="max-w-5xl mx-auto">
                   {contentWarnings.map((w, i) => (
                     <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-amber-400/10 border border-amber-400/20 mb-2">
                       <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
@@ -790,29 +842,29 @@ export default function Workspace() {
               </div>
             )}
             {pausedPhaseIndex !== null && !awaitingEpisodeApproval && !awaitingApproval && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(45, 80%, 50%, 0.3)' }}>
-                  <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(45, 80%, 50%, 0.3)' }}>
+                  <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-amber-400" />
                     <span className="text-amber-400 font-medium">第 {chunksCompleted[currentPhase]?.length || 1} 集已保存</span>
                     <span className="text-muted-foreground">— 可继续生成下一集</span>
                   </div>
-                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
-                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                  <button onClick={handleProceed} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                     <Play className="w-4 h-4" /> 继续生成下一集
                   </button>
                 </div>
               </div>
             )}
             {confirmedPhaseIndex !== null && !awaitingEpisodeApproval && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-green-400" />
                     <span className="text-green-400 font-medium">阶段已确认，内容已保存</span>
                   </div>
-                  <button onClick={() => { clearConfirmedPhase(); handleContinue() }} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
-                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                  <button onClick={() => { clearConfirmedPhase(); handleContinue() }} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                     <Play className="w-4 h-4" /> 继续创作
                   </button>
                 </div>
@@ -820,7 +872,7 @@ export default function Workspace() {
             )}
           </>
         ) : viewContent ? (
-          <><div className="flex-1 overflow-y-auto p-8 animate-fade-in">
+          <><div className="flex-1 overflow-y-auto p-10 animate-fade-in">
             {/* 暂停中 - 继续生成下一集横幅 */}
             {pausedPhaseIndex !== null && (
               <div className="mb-4 p-4 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-between">
@@ -849,7 +901,7 @@ export default function Workspace() {
                 </button>
               </div>
             )}
-            <div className="max-w-3xl mx-auto">
+            <div className="max-w-5xl mx-auto premium-inset p-6">
               {confirmedPhaseId !== null && (
                 <div className="mb-4 p-3 rounded-xl bg-green-400/10 border border-green-400/20 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
@@ -870,7 +922,10 @@ export default function Workspace() {
                 </h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {(awaitingEpisodeApproval || pausedPhaseIndex !== null) && (
-                    <button onClick={() => { setSelectedPhase(-1); setViewContent(''); setActFileList([]); setSuppressStream(false) }} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
+                    <button onClick={() => { setSelectedPhase(-1); setViewContent(''); setActFileList([]); setSuppressStream(false) }} className="px-4 py-2 rounded-xl text-xs transition-all"
+                      style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                       <ChevronRight className="w-3.5 h-3.5 inline mr-1" /> 回到当前阶段
                     </button>
                   )}
@@ -879,13 +934,19 @@ export default function Workspace() {
                       <button onClick={handleSaveEdit} className="btn-gradient inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap">
                         <Check className="w-3.5 h-3.5" /> 保存
                       </button>
-                      <button onClick={handleCancelEdit} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
+                      <button onClick={handleCancelEdit} className="px-4 py-2 rounded-xl text-xs transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                         <X className="w-3.5 h-3.5" /> 取消
                       </button>
                     </>
                   ) : (
                     <>
-                      <button onClick={handleEditContent} className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors">
+                      <button onClick={handleEditContent} className="px-4 py-2 rounded-xl text-xs transition-all"
+                        style={{ color: 'rgba(255,255,255,0.5)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}>
                         <Pencil className="w-3.5 h-3.5 inline mr-1" /> 编辑
                       </button>
                       {!streamContent && !confirmedPhaseId && (
@@ -895,6 +956,14 @@ export default function Workspace() {
                       )}
                     </>
                   )}
+                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[selectedPhase]}/export-docx`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
+                    style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: 'rgba(147,197,253,0.85)' }}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.22)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.40)' }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.12)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.25)' }}
+                  >
+                    📄 导出 Word
+                  </a>
                 </div>
               </div>
               {editingContent ? (
@@ -912,9 +981,9 @@ export default function Workspace() {
             </div>
           </div>
             {awaitingEpisodeApproval && currentEpisode && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
                 {showEpisodeFeedback ? (
-                  <div className="max-w-3xl mx-auto space-y-3">
+                  <div className="max-w-5xl mx-auto space-y-3">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
                       <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
                       <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
@@ -924,11 +993,14 @@ export default function Workspace() {
                       <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
                         <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
                       </button>
-                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-3xl mx-auto">
+                  <div className="max-w-5xl mx-auto">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
@@ -943,7 +1015,10 @@ export default function Workspace() {
                           <ChevronRight className="w-4 h-4" /> 继续下一集
                         </button>
                       )}
-                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                         <Pencil className="w-4 h-4" /> 修改
                       </button>
                     </div>
@@ -952,15 +1027,15 @@ export default function Workspace() {
               </div>
             )}
             {awaitingProceed && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-green-400" />
                     <span className="text-green-400 font-medium">已完成确认</span>
                     <span className="text-muted-foreground">— 准备好后可继续下一步</span>
                   </div>
-                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
-                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                  <button onClick={handleProceed} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                     <Play className="w-4 h-4" /> 继续进行下一步
                   </button>
                 </div>
@@ -970,7 +1045,7 @@ export default function Workspace() {
          ) : connected && currentPhase >= 0 && !viewContent ? (
            <><div className="flex-1 flex flex-col overflow-hidden">
               <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
-              <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+              <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 text-sm">
                   <span>{PHASE_ICONS[currentPhase] || '📝'}</span>
                   <span className="font-medium">{getPhaseNames(projectConfig?.style_type)[currentPhase] || '生成中...'}</span>
@@ -989,8 +1064,8 @@ export default function Workspace() {
                  {connected && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" title="已连接" />}
                </div>
              </div>
-             <div className="flex-1 overflow-y-auto p-8">
-               <div className="max-w-3xl mx-auto">
+             <div className="flex-1 overflow-y-auto p-10">
+               <div className="max-w-5xl mx-auto premium-inset p-6">
                  {!streamContent ? (
                    <div className="flex flex-col items-center justify-center gap-4 py-20">
                      <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -1011,15 +1086,18 @@ export default function Workspace() {
                </div>
              </div>
             {awaitingVersion && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto">
                   <p className="text-sm font-medium mb-4">🎯 方向卡已生成，请选择版本：</p>
                   {showMixInput ? (
                     <div className="space-y-3">
                       <textarea className="w-full rounded-xl px-4 py-3 h-24 resize-none text-sm" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.85)' }} placeholder="请描述你希望如何混合版本A和版本B..." value={mixFeedback} onChange={e => setMixFeedback(e.target.value)} autoFocus />
                       <div className="flex gap-2">
                         <button onClick={handleVersionMix} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium"><Sparkles className="w-4 h-4 inline mr-1" />提交混合</button>
-                        <button onClick={() => setShowMixInput(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                        <button onClick={() => setShowMixInput(false)} className="px-5 py-2 rounded-xl text-sm transition-all"
+                          style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                          onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                          onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                       </div>
                     </div>
                   ) : (
@@ -1028,7 +1106,10 @@ export default function Workspace() {
                       <div className="flex items-center gap-3">
                         <button onClick={handleVersionA} className="btn-gradient px-6 py-3 rounded-xl text-sm font-medium">版本 A</button>
                         <button onClick={handleVersionB} className="btn-gradient px-6 py-3 rounded-xl text-sm font-medium">版本 B</button>
-                        <button onClick={() => setShowMixInput(true)} className="px-5 py-3 rounded-xl border-2 border-border text-sm font-medium hover:border-primary/50 hover:bg-primary/5 transition-all">混合 A + B</button>
+                        <button onClick={() => setShowMixInput(true)} className="px-5 py-3 rounded-xl border-2 text-sm font-medium transition-all"
+                          style={{ borderColor: 'rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                          onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                          onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)'; e.currentTarget.style.background = 'transparent' }}>混合 A + B</button>
                       </div>
                     </div>
                   )}
@@ -1036,22 +1117,28 @@ export default function Workspace() {
               </div>
             )}
             {awaitingApproval && !isComplete && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
                 {showFeedback ? (
-                  <div className="max-w-3xl mx-auto space-y-3">
+                  <div className="max-w-5xl mx-auto space-y-3">
                     <textarea className="w-full bg-muted border border-border rounded-xl px-4 py-3 h-28 resize-none text-sm" placeholder="请输入修改意见..." value={feedbackText} onChange={e => setFeedbackText(e.target.value)} autoFocus />
                     <div className="flex gap-2">
                       <button onClick={handleRevise} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium"><Pencil className="w-4 h-4 inline mr-1" />提交修改</button>
-                      <button onClick={() => setShowFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                      <button onClick={() => setShowFeedback(false)} className="px-5 py-2 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-3xl mx-auto flex items-center gap-2">
+                  <div className="max-w-5xl mx-auto flex items-center gap-2">
                     <button onClick={handleApprove} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
-                      style={{ background: 'hsl(150, 60%, 50%)', color: 'white' }}>
+                      style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                       <Check className="w-4 h-4" /> 通过
                     </button>
-                    <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                    <button onClick={() => setShowFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                      style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                       <Pencil className="w-4 h-4" /> 修改
                     </button>
                     <button onClick={async () => {
@@ -1066,7 +1153,10 @@ export default function Workspace() {
                         }
                         setEditingStream(false)
                       }
-                    }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                    }} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                      style={{ color: 'rgba(255,255,255,0.5)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}>
                       <Pencil className="w-4 h-4" /> {editingStream ? '完成编辑' : '编辑'}
                     </button>
                   </div>
@@ -1074,24 +1164,24 @@ export default function Workspace() {
               </div>
             )}
             {awaitingProceed && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
-                <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+                <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="w-4 h-4 text-green-400" />
                     <span className="text-green-400 font-medium">已完成确认</span>
                     <span className="text-muted-foreground">— 准备好后可继续下一步</span>
                   </div>
-                  <button onClick={handleProceed} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
-                    style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
+                  <button onClick={handleProceed} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: 'linear-gradient(135deg, rgba(74,222,128,0.25), rgba(52,211,153,0.2))', color: 'rgba(74,222,128,0.95)', border: '1px solid rgba(74,222,128,0.3)' }}>
                     <Play className="w-4 h-4" /> 继续进行下一步
                   </button>
                 </div>
               </div>
             )}
             {awaitingEpisodeApproval && currentEpisode && (
-              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
+              <div className="p-5 animate-fade-in-up" style={{ borderTop: '1px solid rgba(139,92,246,0.15)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderColor: 'hsl(35, 80%, 50%, 0.3)' }}>
                 {showEpisodeFeedback ? (
-                  <div className="max-w-3xl mx-auto space-y-3">
+                  <div className="max-w-5xl mx-auto space-y-3">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-1">
                       <span className="font-medium">修改第 {currentEpisode.chunk_index + 1} 集</span>
                       <span className="text-muted-foreground">— 输入修改意见后将重新生成</span>
@@ -1101,11 +1191,14 @@ export default function Workspace() {
                       <button onClick={() => { episodeRevise(episodeFeedbackText); setShowEpisodeFeedback(false); setEpisodeFeedbackText('') }} className="btn-gradient px-5 py-2 rounded-xl text-sm font-medium">
                         <Pencil className="w-4 h-4 inline mr-1" /> 提交修改
                       </button>
-                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                      <button onClick={() => setShowEpisodeFeedback(false)} className="px-5 py-2 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-3xl mx-auto">
+                  <div className="max-w-5xl mx-auto">
                     <div className="flex items-center gap-2 text-sm text-amber-400 mb-3">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                       <span className="font-medium">第 {currentEpisode.chunk_index + 1}/{currentEpisode.total_chunks} 集已生成</span>
@@ -1115,7 +1208,10 @@ export default function Workspace() {
                       <button onClick={() => episodeConfirm(currentEpisode?.phase_index)} className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all border-2 border-primary/40 text-primary hover:bg-primary/5">
                         <Check className="w-4 h-4" /> 完成
                       </button>
-                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-all">
+                      <button onClick={() => setShowEpisodeFeedback(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm transition-all"
+                        style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
                         <Pencil className="w-4 h-4" /> 修改
                       </button>
                     </div>
@@ -1125,7 +1221,7 @@ export default function Workspace() {
             )}
             {contentWarnings.length > 0 && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
-                <div className="max-w-3xl mx-auto">
+                <div className="max-w-5xl mx-auto">
                   {contentWarnings.map((w, i) => (
                     <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-amber-400/10 border border-amber-400/20 mb-2">
                       <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
@@ -1151,7 +1247,7 @@ export default function Workspace() {
          ) : continuing ? (
            <div className="flex-1 flex flex-col overflow-hidden">
              <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
-               <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+               <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
                  <div className="flex items-center gap-2 text-sm">
                    <span>{PHASE_ICONS[currentPhase] || '📝'}</span>
                    <span className="font-medium">{getPhaseNames(projectConfig?.style_type)[currentPhase] || '生成中...'}</span>
@@ -1172,8 +1268,8 @@ export default function Workspace() {
                  {connected && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" title="已连接" />}
                </div>
              </div>
-             <div className="flex-1 overflow-y-auto p-8">
-               <div className="max-w-3xl mx-auto">
+             <div className="flex-1 overflow-y-auto p-10">
+               <div className="max-w-5xl mx-auto premium-inset p-6">
                  {!streamContent ? (
                    <div className="flex flex-col items-center justify-center gap-4 py-20">
                      <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -1251,7 +1347,10 @@ export default function Workspace() {
                 placeholder="例如：动作描写再详细一些 / 场景布局写清楚 / 节奏放慢一点..."
                 value={redoInstruction} onChange={e => setRedoInstruction(e.target.value)} autoFocus />
               <div className="flex justify-end gap-3">
-                <button onClick={() => setShowRedoInput(false)} className="px-5 py-2.5 rounded-xl border border-border text-sm hover:bg-muted transition-colors">取消</button>
+                <button onClick={() => setShowRedoInput(false)} className="px-5 py-2.5 rounded-xl text-sm transition-all"
+                  style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
+                  onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                  onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>取消</button>
                 <button onClick={() => handleRedoPhase(redoPhaseIndex, redoInstruction)} className="btn-gradient px-6 py-2.5 rounded-xl text-sm font-medium">
                   <RefreshCw className="w-4 h-4 inline mr-1" />确认重新生成
                 </button>

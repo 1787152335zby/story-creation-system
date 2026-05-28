@@ -4,6 +4,7 @@ import { ArrowLeft, Save, Loader2, Lock, ExternalLink, Zap, Settings, Check, Eye
 import { fetchSettings, updateSettings, testLLM, fetchAggConfigs, createAggConfig, updateAggConfig, deleteAggConfig, activateAggConfig, deactivateAggType, testAggConfig, fetchAggConfigModels, fetchProviderConfigs, createProviderConfig, updateProviderConfig, deleteProviderConfig, activateProviderConfig } from '../lib/api'
 import type { AggConfig, ProviderConfig, ModelFamily } from '../lib/api'
 import ModelSelector from '../components/ModelSelector'
+import Starfield from '../components/Starfield'
 import { useToast } from '../components/Toast'
 
 const KEY_LINKS: Record<string, string> = {
@@ -186,12 +187,9 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, hsl(var(--primary)), transparent 70%)' }} />
-      </div>
+      <Starfield />
 
-      <div className="max-w-4xl mx-auto px-6 py-10 relative z-10">
+      <div className="max-w-5xl mx-auto px-6 py-10 relative z-10">
         <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground mb-8 transition-colors">
           <ArrowLeft className="w-4 h-4" /> 返回首页
         </button>
@@ -200,7 +198,7 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mb-6">管理 AI 后端的 API Key 并选择当前使用的模型</p>
 
         {/* Tabs */}
-        <div className="glass-card rounded-2xl p-1.5 mb-8 flex animate-fade-in-up">
+        <div className="premium-subpanel p-1.5 mb-8 flex animate-fade-in-up">
           {GROUPS.map((g, i) => (
             <button key={g.name} onClick={() => { setActiveTab(i); setTestResult(null); setAggTestResultSet({}) }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-medium transition-all ${
@@ -215,7 +213,7 @@ export default function SettingsPage() {
         {/* Provider cards */}
         <div className="animate-fade-in-up" key={activeTab}>
           <div className="mb-3 flex items-center gap-2 mt-8">
-            <h3 className="text-xs font-semibold text-muted-foreground">🔑 官网 API</h3>
+            <h3 className="premium-label">🔑 官网 API</h3>
             <div className="flex-1 h-px bg-border/50" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -226,7 +224,7 @@ export default function SettingsPage() {
               const model = getModel(p)
 
               return (
-                <div key={p.id} className={`glass-card rounded-2xl overflow-hidden transition-all duration-300 ${active ? 'ring-2 ring-primary/40' : ''}`}>
+                <div key={p.id} className={`premium-subpanel overflow-hidden transition-all duration-300 ${active ? 'ring-2 ring-primary/40' : ''}`}>
                   <div className="p-5">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1 min-w-0">
@@ -245,7 +243,7 @@ export default function SettingsPage() {
                     {p.models.length > 0 && (
                       <div className="mb-2">
                         <select value={model} onChange={e => p.model_field && update(p.model_field, e.target.value)}
-                          className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-xs">
+                          className="w-full premium-select rounded-lg px-2 py-1.5 text-xs">
                           {p.models.map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
                       </div>
@@ -272,7 +270,7 @@ export default function SettingsPage() {
                       )}
                       {p.test_backend && (
                         <button onClick={() => handleTest(p)} disabled={testing}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background disabled:opacity-40 transition-colors ml-auto">
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/10 text-[10px] hover:bg-background disabled:opacity-40 transition-colors ml-auto">
                           {testing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
                           测试
                         </button>
@@ -285,7 +283,7 @@ export default function SettingsPage() {
                       {p.url_field && (
                         <div>
                           <label className="text-[10px] text-muted-foreground mb-0.5 block">API 地址</label>
-                          <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono"
+                          <input className="w-full premium-input rounded-lg px-3 py-2 text-xs font-mono"
                             placeholder="https://api.example.com/v1" value={val(p.url_field) || ''}
                             onChange={e => update(p.url_field, e.target.value)} />
                         </div>
@@ -295,7 +293,7 @@ export default function SettingsPage() {
                         <label className="text-[10px] text-muted-foreground mb-0.5 block">{p.key_tip}</label>
                         <div className="relative">
                           <Lock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                          <input type={visibleKeyId === p.id ? 'text' : 'password'} className="w-full bg-background border border-border rounded-lg pl-8 pr-8 py-2 text-xs font-mono"
+                          <input type={visibleKeyId === p.id ? 'text' : 'password'} className="w-full premium-input rounded-lg pl-8 pr-8 py-2 text-xs font-mono"
                             value={val(p.key_field)} onChange={e => update(p.key_field, e.target.value)} />
                           <button type="button" onClick={() => setVisibleKeyId(visibleKeyId === p.id ? null : p.id)}
                             className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
@@ -336,7 +334,7 @@ export default function SettingsPage() {
               const provId = activeTab === 0 ? 'deepseek' : activeTab === 1 ? 'seedream' : 'seedance'
               const label = activeTab === 0 ? 'DeepSeek' : activeTab === 1 ? 'Seedream' : 'Seedance'
               return (providerConfigMap[provId] || []).filter(pc => !pc.active).map(pc => (
-              <div key={pc.id} className="glass-card rounded-2xl overflow-hidden border border-dashed border-primary/20 opacity-80 hover:opacity-100 transition-opacity">
+              <div key={pc.id} className="premium-subpanel overflow-hidden border border-dashed border-primary/20 opacity-80 hover:opacity-100 transition-opacity">
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1 min-w-0">
@@ -376,19 +374,19 @@ export default function SettingsPage() {
             {/* 添加官网 API 卡片 */}
             {!provNewConfigId ? (
               <button onClick={() => setProvNewConfigId('__new_provider__')}
-                className="w-full py-6 rounded-2xl border-2 border-dashed border-primary/30 text-sm text-primary hover:bg-primary/5 transition-colors glass-card">
+                className="w-full py-6 rounded-2xl border-2 border-dashed border-primary/30 text-sm text-primary hover:bg-primary/5 transition-colors premium-section">
                 <Plus className="w-4 h-4 inline mr-1" /> 添加官网 API
               </button>
             ) : (
-              <div className="glass-card rounded-2xl overflow-hidden">
+              <div className="premium-subpanel overflow-hidden">
                 <div className="p-5">
                   <h4 className="text-xs font-medium text-muted-foreground mb-3">新建官网 API</h4>
                   <div className="space-y-2">
-                    <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs"
+                    <input className="w-full premium-input rounded-lg px-3 py-2 text-xs"
                       placeholder="官网名称（如: OpenAI）" value={provNewProvider} onChange={e => setProvNewProvider(e.target.value)} />
-                    <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono"
+                    <input className="w-full premium-input rounded-lg px-3 py-2 text-xs font-mono"
                       placeholder="API 地址" value={provNewUrl} onChange={e => setProvNewUrl(e.target.value)} />
-                    <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono"
+                    <input className="w-full premium-input rounded-lg px-3 py-2 text-xs font-mono"
                       placeholder="API Key" value={provNewKey} onChange={e => setProvNewKey(e.target.value)} />
                     <ModelSelector type={typeKey} value={provNewModel} onChange={setProvNewModel} />
                     <div className="flex items-center gap-1.5">
@@ -410,7 +408,7 @@ export default function SettingsPage() {
                         <Check className="w-3 h-3" /> 添加
                       </button>
                       <button onClick={() => setProvNewConfigId(null)}
-                        className="px-3 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background">
+                        className="px-3 py-1.5 rounded-lg border border-white/10 text-[10px] hover:bg-background">
                         取消
                       </button>
                     </div>
@@ -423,7 +421,7 @@ export default function SettingsPage() {
 
           {/* 聚合平台区域 */}
           <div className="mb-3 flex items-center gap-2 mt-8">
-            <h3 className="text-xs font-semibold text-muted-foreground">🌐 聚合平台</h3>
+            <h3 className="premium-label">🌐 聚合平台</h3>
             <div className="flex-1 h-px bg-border/50" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
@@ -433,13 +431,13 @@ export default function SettingsPage() {
               const isEditing = editingAggId === cfg.id
               const keyHint = cfg.api_key?.length > 8 ? `...${cfg.api_key.slice(-8)}` : '已配置'
               return (
-              <div key={cfg.id} className={`glass-card rounded-2xl overflow-hidden transition-all duration-300 ${cfg.active ? 'ring-2 ring-primary/40' : ''}`}>
+              <div key={cfg.id} className={`premium-subpanel overflow-hidden transition-all duration-300 ${cfg.active ? 'ring-2 ring-primary/40' : ''}`}>
                 <div className="p-4">
                   {/* Header */}
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-sm">🌐</span>
                     {isEditing ? (
-                      <input className="flex-1 bg-background border border-border rounded-lg px-2 py-1 text-xs"
+                      <input className="flex-1 premium-input rounded-lg px-2 py-1 text-xs"
                         value={editAggName} onChange={e => setEditAggName(e.target.value)} placeholder="名称" />
                     ) : (
                       <div className="flex-1 min-w-0">
@@ -455,7 +453,7 @@ export default function SettingsPage() {
                         setEditAggName(cfg.name || '')
                         setEditAggUrl(cfg.base_url || '')
                         setEditAggKey(cfg.api_key || '')
-                      }} className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                      }} className="p-1 rounded-lg hover:bg-white/[0.04] text-muted-foreground hover:text-foreground transition-colors">
                         <Settings className="w-3 h-3" />
                       </button>
                     )}
@@ -464,11 +462,11 @@ export default function SettingsPage() {
                   {/* URL and key row */}
                   {isEditing ? (
                     <div className="space-y-1.5 mb-2">
-                      <input className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[10px] font-mono"
+                      <input className="w-full premium-input rounded-lg px-2 py-1.5 text-[10px] font-mono"
                         value={editAggUrl} onChange={e => setEditAggUrl(e.target.value)} placeholder="API 地址" />
                       <div className="relative">
                         <Lock className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                        <input type={visibleAggKey === cfg.id ? 'text' : 'password'} className="w-full bg-background border border-border rounded-lg pl-7 pr-7 py-1.5 text-[10px] font-mono"
+                        <input type={visibleAggKey === cfg.id ? 'text' : 'password'} className="w-full premium-input rounded-lg pl-7 pr-7 py-1.5 text-[10px] font-mono"
                           value={editAggKey} onChange={e => setEditAggKey(e.target.value)} placeholder="API Key" />
                         <button type="button" onClick={() => setVisibleAggKey(visibleAggKey === cfg.id ? null : cfg.id)}
                           className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
@@ -491,15 +489,15 @@ export default function SettingsPage() {
                   {/* Model selector */}
                   <div className="flex items-center gap-1.5 mb-2">
                     <select value={aggSelectedFamily[cfg.id] || ''} onChange={e => setAggSelectedFamily(p => ({ ...p, [cfg.id]: e.target.value }))}
-                      className="flex-1 bg-muted border border-border rounded-lg px-1.5 py-1 text-[10px] appearance-none min-w-0">
+                      className="flex-1 premium-select rounded-lg px-1.5 py-1 text-[10px] appearance-none min-w-0">
                       {(aggFamilies[cfg.id] || []).length === 0 && <option>加载中...</option>}
                       {(aggFamilies[cfg.id] || []).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                     </select>
                     <select value={cfg.model || ''} onChange={async e => {
-                      await updateAggConfig(cfg.id, { model: e.target.value })
-                      fetchAggConfigsAndModels()
-                    }}
-                      className="flex-1 bg-muted border border-border rounded-lg px-1.5 py-1 text-[10px] appearance-none min-w-0">
+                        await updateAggConfig(cfg.id, { model: e.target.value })
+                        fetchAggConfigsAndModels()
+                      }}
+                        className="flex-1 premium-select rounded-lg px-1.5 py-1 text-[10px] appearance-none min-w-0">
                       {!cfg.model && <option value="">版本</option>}
                       {(() => {
                         const family = (aggFamilies[cfg.id] || []).find(f => f.id === aggSelectedFamily[cfg.id])
@@ -508,7 +506,7 @@ export default function SettingsPage() {
                     </select>
                     {aggLoadingModels[cfg.id] && <Loader2 className="w-2.5 h-2.5 animate-spin text-muted-foreground flex-shrink-0" />}
                     <button onClick={() => loadAggModels([cfg])} disabled={aggLoadingModels[cfg.id]}
-                      className="p-1 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
+                      className="p-1 rounded-lg border border-white/10 hover:bg-white/[0.04] text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
                       <RefreshCw className="w-2.5 h-2.5" />
                     </button>
                   </div>
@@ -525,7 +523,7 @@ export default function SettingsPage() {
                         <Save className="w-2.5 h-2.5" /> 保存
                       </button>
                       <button onClick={() => setEditingAggId(null)}
-                        className="px-2.5 py-1 rounded-lg border border-border text-[10px] hover:bg-muted transition-colors">
+                        className="px-2.5 py-1 rounded-lg border border-white/10 text-[10px] hover:bg-white/[0.04] transition-colors">
                         取消
                       </button>
                     </div>
@@ -537,7 +535,7 @@ export default function SettingsPage() {
                         setAggTestResultSet(p => ({ ...p, [cfg.id]: r }))
                         setAggTestingSet(p => ({ ...p, [cfg.id]: false }))
                       }} disabled={aggTestingSet[cfg.id]}
-                        className="flex items-center gap-0.5 px-2 py-1 rounded-lg border border-border text-[10px] hover:bg-muted disabled:opacity-40 transition-colors">
+                        className="flex items-center gap-0.5 px-2 py-1 rounded-lg border border-white/10 text-[10px] hover:bg-white/[0.04] disabled:opacity-40 transition-colors">
                         {aggTestingSet[cfg.id] ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
                         测试
                       </button>
@@ -572,21 +570,21 @@ export default function SettingsPage() {
             {/* 添加聚合平台卡片 — 独立的虚线卡片 */}
             {!newAggExpanded ? (
               <button onClick={() => setNewAggExpanded(true)}
-                className="w-full py-6 rounded-2xl border-2 border-dashed border-primary/30 text-sm text-primary hover:bg-primary/5 transition-colors glass-card">
+                className="w-full py-6 rounded-2xl border-2 border-dashed border-primary/30 text-sm text-primary hover:bg-primary/5 transition-colors premium-section">
                 <Plus className="w-4 h-4 inline mr-1" /> 添加聚合平台
               </button>
             ) : (
-              <div className="glass-card rounded-2xl overflow-hidden">
+              <div className="premium-subpanel overflow-hidden">
                 <div className="p-5">
                   <h4 className="text-xs font-medium text-muted-foreground mb-3">新建聚合平台配置</h4>
                   <div className="space-y-2">
-                    <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs"
+                    <input className="w-full premium-input rounded-lg px-3 py-2 text-xs"
                       placeholder="名称（如: 聚合A）" value={newAggName} onChange={e => setNewAggName(e.target.value)} />
-                    <input className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono"
+                    <input className="w-full premium-input rounded-lg px-3 py-2 text-xs font-mono"
                       placeholder="API 地址（如: https://api.xxx.com/v1）" value={newAggUrl} onChange={e => setNewAggUrl(e.target.value)} />
                     <div className="relative">
                       <Lock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                      <input type="password" className="w-full bg-background border border-border rounded-lg pl-8 pr-8 py-2 text-xs font-mono"
+                      <input type="password" className="w-full premium-input rounded-lg pl-8 pr-8 py-2 text-xs font-mono"
                         placeholder="API Key" value={newAggKey} onChange={e => setNewAggKey(e.target.value)} />
                     </div>
                     <ModelSelector type={typeKey} value={newAggModel} onChange={setNewAggModel} />
@@ -598,7 +596,7 @@ export default function SettingsPage() {
                           setAggTestResultSet(p => ({ ...p, ['__new__']: r }))
                           setAggTestingSet(p => ({ ...p, ['__new__']: false }))
                         }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background">
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/10 text-[10px] hover:bg-background">
                         {aggTestingSet['__new__'] ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Zap className="w-2.5 h-2.5" />}
                         测试
                       </button>
@@ -616,7 +614,7 @@ export default function SettingsPage() {
                         <Check className="w-2.5 h-2.5" /> 添加
                       </button>
                       <button onClick={() => setNewAggExpanded(false)}
-                        className="px-2.5 py-1.5 rounded-lg border border-border text-[10px] hover:bg-background">
+                        className="px-2.5 py-1.5 rounded-lg border border-white/10 text-[10px] hover:bg-background">
                         取消
                       </button>
                     </div>
@@ -634,7 +632,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Save bar */}
-        <div className="sticky bottom-6 glass-card rounded-2xl p-4 flex items-center justify-between">
+        <div className="sticky bottom-6 premium-subpanel p-4 flex items-center justify-between">
           <p className="text-xs text-muted-foreground">每个卡片内点「保存」单独生效</p>
           <div className="flex items-center gap-3">
             {Object.keys(dirtyFields).length > 0 && (

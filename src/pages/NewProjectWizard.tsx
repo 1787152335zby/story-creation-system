@@ -140,15 +140,16 @@ export default function NewProjectWizard() {
   }
 
   const tagStyle = (active: boolean) => ({
-    border: active ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.06)',
-    background: active ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.02)',
-    color: active ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.45)',
+    border: active ? '1px solid rgba(167,139,250,0.4)' : '1px solid rgba(255,255,255,0.06)',
+    background: active ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.03)',
+    color: active ? 'rgba(220,210,255,0.95)' : 'rgba(255,255,255,0.50)',
+    boxShadow: active ? '0 0 12px rgba(167,139,250,0.08)' : 'none',
   })
 
   return (
     <div className="min-h-screen relative overflow-hidden">
       <Starfield />
-      <div className="px-6 py-10 max-w-3xl mx-auto relative z-10">
+      <div className="px-8 py-10 max-w-4xl mx-auto relative z-10">
 
         <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 mb-8 transition-all text-xs">
           <ArrowLeft className="w-3.5 h-3.5" /> 返回
@@ -170,39 +171,47 @@ export default function NewProjectWizard() {
             <div key={i} className="flex items-center gap-2">
               <div className="flex items-center gap-2">
                 <div style={{
-                  width: 28, height: 28, borderRadius: 10,
+                  width: 30, height: 30, borderRadius: 10,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: i <= step ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${i <= step ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)'}`,
-                  transition: 'all 0.3s',
+                  background: i <= step ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${i === step ? 'rgba(167,139,250,0.5)' : i < step ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.05)'}`,
+                  boxShadow: i === step ? '0 0 16px rgba(167,139,250,0.2), inset 0 0 8px rgba(167,139,250,0.08)' : 'none',
+                  transition: 'all 0.4s ease',
                 }}>
                   {i < step ? (
-                    <Check className="w-3.5 h-3.5 text-white/60" />
+                    <Check className="w-3.5 h-3.5" style={{ color: 'rgba(74,222,128,0.85)' }} />
                   ) : (
-                    <span style={{ fontSize: 11, fontWeight: 600, color: i <= step ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.45)' }}>{i + 1}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: i <= step ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.35)' }}>{i + 1}</span>
                   )}
                 </div>
-                <span className="hidden sm:inline text-[11px]" style={{ color: i <= step ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.35)', fontWeight: i <= step ? 500 : 400 }}>{s}</span>
+                <span className="hidden sm:inline text-[11px]" style={{
+                  color: i === step ? 'rgba(167, 139, 250, 0.8)' : i < step ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.25)',
+                  fontWeight: i === step ? 600 : 400
+                }}>{s}</span>
               </div>
               {i < steps.length - 1 && (
-                <div style={{ width: 20, height: 1, background: i < step ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)' }} />
+                <div style={{
+                  width: 24, height: 1.5, borderRadius: 1,
+                  background: i < step
+                    ? 'linear-gradient(90deg, rgba(74,222,128,0.3), rgba(255,255,255,0.1))'
+                    : 'rgba(255,255,255,0.08)'
+                }} />
               )}
             </div>
           ))}
         </div>
 
-        <div className="rounded-2xl overflow-hidden animate-fade-in-up delay-100">
-          <div className="px-6 py-6" key={step}
+        <div className="animate-fade-in-up delay-100">
+          <div className="premium-panel px-8 py-8" key={step}
             style={{
-              background: 'rgba(255,255,255,0.12)',
-              backdropFilter: 'blur(24px)',
-              WebkitBackdropFilter: 'blur(24px)',
-              border: '1px solid rgba(255,255,255,0.22)',
+              animation: 'fade-slide-in 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards'
             }}>
-            <h2 className="text-sm font-semibold text-white/80 mb-6 flex items-center gap-2">
-              <Wand2 className="w-4 h-4 text-white/40" />
-              {steps[step]}
-            </h2>
+            <div className="premium-header">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Wand2 className="w-4 h-4" style={{ color: 'rgba(167, 139, 250, 0.6)' }} />
+                {steps[step]}
+              </h2>
+            </div>
 
             {step === 0 && (
               <div>
@@ -243,9 +252,10 @@ export default function NewProjectWizard() {
                       <button key={k} onClick={() => setStyle({ ...style, story_type: k })}
                         className={`p-3 rounded-xl text-sm transition-all duration-200 text-left glow-border shimmer-hover relative overflow-hidden ${style.story_type === k ? 'selected' : ''}`}
                         style={{
-                          background: style.story_type === k ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.07)',
-                          border: `1px solid ${style.story_type === k ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.16)'}`,
-                          color: style.story_type === k ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.60)',
+                          background: style.story_type === k ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${style.story_type === k ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                          color: style.story_type === k ? 'rgba(230,220,255,0.95)' : 'rgba(255,255,255,0.55)',
+                          boxShadow: style.story_type === k ? '0 0 16px rgba(167,139,250,0.10)' : 'none',
                         }}>
                         <div className="relative z-[1]">
                           <div className="font-medium text-sm">{v}</div>
@@ -272,13 +282,14 @@ export default function NewProjectWizard() {
                       <button key={g} onClick={() => toggleGenre(g)}
                         className={`px-3 py-1.5 rounded-lg text-[11px] transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${selectedGenres.includes(g) ? 'selected' : ''}`}
                         style={selectedGenres.includes(g) ? {
-                          border: '1px solid rgba(255,255,255,0.30)',
-                          background: 'rgba(255,255,255,0.16)',
-                          color: 'rgba(255,255,255,0.95)'
+                          border: '1px solid rgba(167,139,250,0.4)',
+                          background: 'rgba(167,139,250,0.15)',
+                          color: 'rgba(220,210,255,0.95)',
+                          boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                         } : {
-                          border: '1px solid rgba(255,255,255,0.16)',
-                          background: 'rgba(255,255,255,0.07)',
-                          color: 'rgba(255,255,255,0.75)'
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          background: 'rgba(255,255,255,0.03)',
+                          color: 'rgba(255,255,255,0.50)'
                         }}>
                         <div className="relative z-[1]">
                           {selectedGenres.includes(g) && <Check className="w-2.5 h-2.5 inline mr-1" />}
@@ -312,13 +323,14 @@ export default function NewProjectWizard() {
                             setCustomActive(a => ({ ...a, [field]: false }))
                           }} className={`px-3 py-1.5 rounded-lg text-[11px] transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${active ? 'selected' : ''}`}
                           style={active ? {
-                            border: '1px solid rgba(255,255,255,0.30)',
-                            background: 'rgba(255,255,255,0.16)',
-                            color: 'rgba(255,255,255,0.95)'
+                            border: '1px solid rgba(167,139,250,0.4)',
+                            background: 'rgba(167,139,250,0.15)',
+                            color: 'rgba(220,210,255,0.95)',
+                            boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                           } : {
-                            border: '1px solid rgba(255,255,255,0.16)',
-                            background: 'rgba(255,255,255,0.07)',
-                            color: 'rgba(255,255,255,0.75)'
+                            border: '1px solid rgba(255,255,255,0.06)',
+                            background: 'rgba(255,255,255,0.03)',
+                            color: 'rgba(255,255,255,0.50)'
                           }}>
                             <div className="relative z-[1]">
                               {v}
@@ -331,13 +343,14 @@ export default function NewProjectWizard() {
                         setStyle({ ...style, [field]: customTexts[field] || '' })
                       }} className={`px-3 py-1.5 rounded-lg text-[11px] transition-all duration-200 border border-dashed glow-border shimmer-hover relative overflow-hidden ${customActive[field] ? 'selected' : ''}`}
                       style={customActive[field] ? {
-                        border: '1px dashed rgba(255,255,255,0.30)',
-                        background: 'rgba(255,255,255,0.16)',
-                        color: 'rgba(255,255,255,0.95)'
+                        border: '1px dashed rgba(167,139,250,0.4)',
+                        background: 'rgba(167,139,250,0.15)',
+                        color: 'rgba(220,210,255,0.95)',
+                        boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                       } : {
-                        border: '1px dashed rgba(255,255,255,0.16)',
-                        background: 'rgba(255,255,255,0.07)',
-                        color: 'rgba(255,255,255,0.75)'
+                        border: '1px dashed rgba(255,255,255,0.06)',
+                        background: 'rgba(255,255,255,0.03)',
+                        color: 'rgba(255,255,255,0.50)'
                       }}>
                         <div className="relative z-[1]">
                           + 自定义
@@ -345,8 +358,7 @@ export default function NewProjectWizard() {
                       </button>
                     </div>
                     {customActive[field] && (
-                      <input autoFocus className="w-full mt-2 rounded-xl px-4 py-2.5 text-xs outline-none"
-                        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                      <input autoFocus className="w-full premium-input rounded-xl px-4 py-2.5 text-xs"
                         placeholder="请输入自定义风格..."
                         value={customTexts[field] || ''}
                         onChange={e => {
@@ -375,13 +387,14 @@ export default function NewProjectWizard() {
                       <button key={m} onClick={() => toggleMood(m)}
                         className={`px-3 py-1.5 rounded-lg text-[11px] transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${selectedMoods.includes(m) ? 'selected' : ''}`}
                         style={selectedMoods.includes(m) ? {
-                          border: '1px solid rgba(255,255,255,0.30)',
-                          background: 'rgba(255,255,255,0.16)',
-                          color: 'rgba(255,255,255,0.95)'
+                          border: '1px solid rgba(167,139,250,0.4)',
+                          background: 'rgba(167,139,250,0.15)',
+                          color: 'rgba(220,210,255,0.95)',
+                          boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                         } : {
-                          border: '1px solid rgba(255,255,255,0.16)',
-                          background: 'rgba(255,255,255,0.07)',
-                          color: 'rgba(255,255,255,0.75)'
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          background: 'rgba(255,255,255,0.03)',
+                          color: 'rgba(255,255,255,0.50)'
                         }}>
                         <div className="relative z-[1]">
                           {selectedMoods.includes(m) && <Check className="w-2.5 h-2.5 inline mr-1" />}
@@ -400,13 +413,14 @@ export default function NewProjectWizard() {
                   <button onClick={() => setStyle({ ...style, duration_mode: '1' })}
                     className={`flex-1 py-2.5 px-4 rounded-xl text-[11px] font-medium transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${style.duration_mode === '1' ? 'selected' : ''}`}
                     style={style.duration_mode === '1' ? {
-                      border: '1px solid rgba(255,255,255,0.30)',
-                      background: 'rgba(255,255,255,0.16)',
-                      color: 'rgba(255,255,255,0.95)'
+                      border: '1px solid rgba(167,139,250,0.4)',
+                      background: 'rgba(167,139,250,0.15)',
+                      color: 'rgba(220,210,255,0.95)',
+                      boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                     } : {
-                      border: '1px solid rgba(255,255,255,0.16)',
-                      background: 'rgba(255,255,255,0.07)',
-                      color: 'rgba(255,255,255,0.75)'
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      background: 'rgba(255,255,255,0.03)',
+                      color: 'rgba(255,255,255,0.50)'
                     }}>
                     <div className="relative z-[1]">
                       自动时长
@@ -415,13 +429,14 @@ export default function NewProjectWizard() {
                   <button onClick={() => setStyle({ ...style, duration_mode: '2' })}
                     className={`flex-1 py-2.5 px-4 rounded-xl text-[11px] font-medium transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${style.duration_mode === '2' ? 'selected' : ''}`}
                     style={style.duration_mode === '2' ? {
-                      border: '1px solid rgba(255,255,255,0.30)',
-                      background: 'rgba(255,255,255,0.16)',
-                      color: 'rgba(255,255,255,0.95)'
+                      border: '1px solid rgba(167,139,250,0.4)',
+                      background: 'rgba(167,139,250,0.15)',
+                      color: 'rgba(220,210,255,0.95)',
+                      boxShadow: '0 0 12px rgba(167,139,250,0.08)'
                     } : {
-                      border: '1px solid rgba(255,255,255,0.16)',
-                      background: 'rgba(255,255,255,0.07)',
-                      color: 'rgba(255,255,255,0.75)'
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      background: 'rgba(255,255,255,0.03)',
+                      color: 'rgba(255,255,255,0.50)'
                     }}>
                     <div className="relative z-[1]">
                       自定义时长
@@ -432,14 +447,12 @@ export default function NewProjectWizard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-[10px] text-white/30 block mb-2">集数/章节数</label>
-                      <input className="w-full rounded-xl px-4 py-2.5 text-xs outline-none"
-                        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                      <input className="w-full premium-input rounded-xl px-4 py-2.5 text-xs"
                         placeholder="如 12" value={style.episode_count} onChange={e => setStyle({ ...style, episode_count: e.target.value })} />
                     </div>
                     <div>
                       <label className="text-[10px] text-white/30 block mb-2">单集时长</label>
-                      <input className="w-full rounded-xl px-4 py-2.5 text-xs outline-none"
-                        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                      <input className="w-full premium-input rounded-xl px-4 py-2.5 text-xs"
                         placeholder="如 45分钟" value={style.episode_duration} onChange={e => setStyle({ ...style, episode_duration: e.target.value })} />
                     </div>
                   </div>
@@ -451,8 +464,7 @@ export default function NewProjectWizard() {
               <div className="space-y-5">
                 <div>
                   <label className="text-[11px] text-white/30 block mb-2">项目名称</label>
-                  <input className="w-full rounded-xl px-4 py-2.5 text-xs outline-none"
-                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                  <input className="w-full premium-input rounded-xl px-4 py-2.5 text-xs"
                     placeholder="给你的项目起个名字" value={projectName} onChange={e => setProjectName(e.target.value)} />
                 </div>
                 <div>
@@ -464,15 +476,13 @@ export default function NewProjectWizard() {
                       {randomLoading ? '生成中...' : '随机生成'}
                     </button>
                   </label>
-                  <textarea className="w-full rounded-xl px-4 py-3 h-32 resize-none text-xs outline-none"
-                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                  <textarea className="w-full premium-input rounded-xl px-4 py-3 h-32 resize-none text-xs"
                     placeholder="用一段话描述你想讲的故事..."
                     value={storyIdea} onChange={e => setStoryIdea(e.target.value)} />
                 </div>
                 <div>
                   <label className="text-[11px] text-white/30 block mb-2">额外要求（可选）</label>
-                  <textarea className="w-full rounded-xl px-4 py-3 h-20 resize-none text-xs outline-none"
-                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}
+                  <textarea className="w-full premium-input rounded-xl px-4 py-3 h-20 resize-none text-xs"
                     placeholder="参考作品、情绪基调等..." value={style.custom_requirements} onChange={e => setStyle({ ...style, custom_requirements: e.target.value })} />
                 </div>
               </div>
@@ -484,8 +494,7 @@ export default function NewProjectWizard() {
                 <div className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)' }}>
                   <label className="text-[9px] text-white/25 mb-1.5 block">LLM 文本生成模型</label>
                   <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-                    className="w-full rounded-xl px-4 py-2.5 text-xs outline-none"
-                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.82)' }}>
+                    className="w-full premium-input rounded-xl px-4 py-2.5 text-xs">
                     {llmModels.length === 0 && <option value="">暂无可用模型，请先到设置页配置</option>}
                     {llmModels.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
@@ -498,8 +507,8 @@ export default function NewProjectWizard() {
 
         <div className="flex justify-between mt-6 animate-fade-in-up delay-200">
           <button onClick={() => step > 0 ? setStep(step - 1) : navigate('/home')}
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[11px] transition-all"
-            style={{ border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)' }}>
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] transition-all hover:opacity-80"
+            style={{ color: 'rgba(255,255,255,0.45)' }}>
             <ArrowLeft className="w-3.5 h-3.5" /> 上一步
           </button>
           {step < 4 ? (
@@ -508,14 +517,14 @@ export default function NewProjectWizard() {
               if (step === 3 && !storyIdea.trim()) { toast('请填写故事描述', 'info'); return }
               setStep(step + 1)
             }}
-              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-[11px] font-medium transition-all"
-              style={{ background: '#fff', color: '#000' }}>
+              className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-[11px] font-medium transition-all hover:gap-3"
+              style={{ background: 'linear-gradient(135deg, #fff, rgba(255,255,255,0.85))', color: '#000' }}>
               下一步 <ArrowRight className="w-3.5 h-3.5" />
             </button>
           ) : (
             <button onClick={handleCreate} disabled={loading || !storyIdea}
-              className="flex items-center gap-1.5 px-8 py-2.5 rounded-xl text-[11px] font-medium transition-all disabled:opacity-40"
-              style={{ background: '#fff', color: '#000' }}>
+              className="flex items-center gap-1.5 px-8 py-3 rounded-xl text-[11px] font-medium transition-all disabled:opacity-40 hover:scale-[1.02]"
+              style={{ background: 'linear-gradient(135deg, #fff, rgba(255,255,255,0.85))', color: '#000', boxShadow: '0 4px 24px rgba(0,0,0,0.3)' }}>
               <Sparkles className="w-3.5 h-3.5" /> {loading ? '创建中...' : '开始创作'}
             </button>
           )}

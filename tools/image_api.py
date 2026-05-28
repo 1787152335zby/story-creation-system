@@ -3,10 +3,29 @@ from typing import Optional
 
 
 class ImageBackend(ABC):
+    MAX_REFERENCE_IMAGES: int = 1
+    SUPPORTS_IMG2IMG: bool = True
+
     @abstractmethod
     def text_to_image(self, prompt: str, negative_prompt: str = "", size: str = "1024x1024", n: int = 1, model: str = "") -> list[str]:
         """
         Text-to-image generation.
+        Returns list of image URLs.
+        """
+
+    @abstractmethod
+    def image_to_image(
+        self,
+        images_base64: list[str],
+        prompt: str,
+        negative_prompt: str = "",
+        strength: float = 0.7,
+        size: str = "1024x1024",
+        n: int = 1,
+        model: str = ""
+    ) -> list[str]:
+        """
+        Image-to-image generation.
         Returns list of image URLs.
         """
 

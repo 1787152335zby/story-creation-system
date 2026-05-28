@@ -79,7 +79,6 @@ export function useWebSocket() {
     setAwaitingVersion(false)
     setAwaitingProceed(false)
     setContentWarnings([])
-    setChunksCompleted({})
     setAwaitingEpisodeApproval(false)
     setCurrentEpisode(null)
 

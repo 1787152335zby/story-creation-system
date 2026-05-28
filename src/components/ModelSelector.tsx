@@ -65,7 +65,7 @@ export default function ModelSelector({ type, value, onChange, className = '' }:
       {!useCustom ? (
         <>
           <select value={selectedFamily} onChange={e => handleFamilyChange(e.target.value)}
-            className="min-w-0 flex-1 bg-muted border border-border rounded-xl px-2 py-2 text-xs">
+            className="min-w-0 flex-1 premium-select rounded-xl px-2 py-2 text-xs">
             {loading ? <option>加载中...</option>
             : families.length === 0 ? <option>无可用模型</option>
             : families.map(f => (
@@ -73,29 +73,29 @@ export default function ModelSelector({ type, value, onChange, className = '' }:
               ))}
           </select>
           <select value={value} onChange={e => onChange(e.target.value)}
-            className="min-w-0 flex-[2] bg-muted border border-border rounded-xl px-2 py-2 text-xs"
+            className="min-w-0 flex-[2] premium-select rounded-xl px-2 py-2 text-xs"
             disabled={!selectedFamily || loading}>
             {loading ? <option>加载中...</option>
             : !currentFamily ? <option>选择家族</option>
             : currentFamily.versions.length === 0 ? <option>无版本</option>
             : currentFamily.versions.map(v => <option key={v.value} value={v.value} className="text-xs">{v.label}</option>)}
           </select>
-          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground my-auto flex-shrink-0" />}
+          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: 'rgba(167, 139, 250, 0.5)' }} />}
           <button onClick={() => { setUseCustom(true); setCustomInput(value) }} title="自定义输入"
-            className="p-1.5 rounded-lg border border-border hover:bg-background text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 my-auto text-[10px]">
+            className="p-1.5 rounded-lg border border-white/10 hover:bg-white/[0.05] transition-colors flex-shrink-0 my-auto text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
             ✏️
           </button>
           <button onClick={() => loadFamilies(true)} title="刷新模型列表"
-            className="p-1.5 rounded-lg border border-border hover:bg-background text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 my-auto">
+            className="p-1.5 rounded-lg border border-white/10 hover:bg-white/[0.05] transition-colors flex-shrink-0 my-auto" style={{ color: 'rgba(255,255,255,0.4)' }}>
             <RefreshCw className="w-3 h-3" />
           </button>
         </>
       ) : (
         <>
           <input value={customInput} onChange={e => { setCustomInput(e.target.value); onChange(e.target.value) }}
-            placeholder="输入模型名" className="min-w-0 flex-1 bg-muted border border-border rounded-xl px-2 py-2 text-xs font-mono" />
+            placeholder="输入模型名" className="min-w-0 flex-1 premium-input rounded-xl px-2 py-2 text-xs font-mono" />
           <button onClick={() => { setUseCustom(false); if (families.length > 0) handleFamilyChange(families[0].id) }}
-            className="p-1.5 rounded-lg border border-border hover:bg-background text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 my-auto text-[10px] whitespace-nowrap px-2">
+            className="p-1.5 rounded-lg border border-white/10 hover:bg-white/[0.05] transition-colors flex-shrink-0 my-auto text-[10px] whitespace-nowrap px-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
             列表
           </button>
         </>

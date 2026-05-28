@@ -26,6 +26,40 @@ class OpenAICompatBackend(ImageBackend):
         data = response.json()
         return [img["url"] for img in data.get("data", [])]
 
+    def image_to_image(
+        self,
+        images_base64: list[str],
+        prompt: str,
+        negative_prompt: str = "",
+        strength: float = 0.7,
+        size: str = "1024x1024",
+        n: int = 1,
+        model: str = ""
+    ) -> list[str]:
+        image_base64 = images_base64[0]
+        url = f"{self.base_url.rstrip('/')}/images/generations"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        
+        # 清理 base64 前缀（如果有）
+        if image_base64.startswith("data:image"):
+            image_base64 = image_base64.split(",")[1]
+        
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "image": image_base64,
+            "strength": max(0.0, min(1.0, strength)),
+            "n": n,
+            "size": size
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        return [img["url"] for img in data.get("data", [])]
+
     def name(self) -> str:
         return self._name
 
@@ -41,6 +75,40 @@ class GPTImageBackend(ImageBackend):
         url = f"{self.base_url.rstrip('/')}/images/generations"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {"model": model or self.model, "prompt": prompt, "n": n, "size": size}
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        return [img["url"] for img in data.get("data", [])]
+
+    def image_to_image(
+        self,
+        images_base64: list[str],
+        prompt: str,
+        negative_prompt: str = "",
+        strength: float = 0.7,
+        size: str = "1024x1024",
+        n: int = 1,
+        model: str = ""
+    ) -> list[str]:
+        image_base64 = images_base64[0]
+        url = f"{self.base_url.rstrip('/')}/images/generations"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        
+        # 清理 base64 前缀（如果有）
+        if image_base64.startswith("data:image"):
+            image_base64 = image_base64.split(",")[1]
+        
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "image": image_base64,
+            "strength": max(0.0, min(1.0, strength)),
+            "n": n,
+            "size": size
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
+        
         response = requests.post(url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         data = response.json()
@@ -66,6 +134,40 @@ class Banana2Backend(ImageBackend):
         data = response.json()
         return [img["url"] for img in data.get("data", [])]
 
+    def image_to_image(
+        self,
+        images_base64: list[str],
+        prompt: str,
+        negative_prompt: str = "",
+        strength: float = 0.7,
+        size: str = "1024x1024",
+        n: int = 1,
+        model: str = ""
+    ) -> list[str]:
+        image_base64 = images_base64[0]
+        url = f"{self.base_url.rstrip('/')}/images/generations"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        
+        # 清理 base64 前缀（如果有）
+        if image_base64.startswith("data:image"):
+            image_base64 = image_base64.split(",")[1]
+        
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "image": image_base64,
+            "strength": max(0.0, min(1.0, strength)),
+            "n": n,
+            "size": size
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        return [img["url"] for img in data.get("data", [])]
+
     def name(self) -> str:
         return "Nano Banana 2"
 
@@ -81,6 +183,40 @@ class CustomImageBackend(ImageBackend):
         url = f"{self.base_url.rstrip('/')}/images/generations"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {"model": model or self.model, "prompt": prompt, "n": n, "size": size}
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        return [img["url"] for img in data.get("data", [])]
+
+    def image_to_image(
+        self,
+        images_base64: list[str],
+        prompt: str,
+        negative_prompt: str = "",
+        strength: float = 0.7,
+        size: str = "1024x1024",
+        n: int = 1,
+        model: str = ""
+    ) -> list[str]:
+        image_base64 = images_base64[0]
+        url = f"{self.base_url.rstrip('/')}/images/generations"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        
+        # 清理 base64 前缀（如果有）
+        if image_base64.startswith("data:image"):
+            image_base64 = image_base64.split(",")[1]
+        
+        payload = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "image": image_base64,
+            "strength": max(0.0, min(1.0, strength)),
+            "n": n,
+            "size": size
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
+        
         response = requests.post(url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         data = response.json()

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 import os, json, uuid, time, requests, shutil, threading
 from tools.video_api_seedance import SeedanceBackend
+from tools.video_api import create_video_backend
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,41 @@ TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 from core.project_manager import PROJECTS_DIR
 
 QUALITY_NEGATIVE = "bad hands, missing fingers, extra fingers, fused fingers, mutated hands, poorly drawn face, asymmetric eyes, distorted background, warped perspective, impossible architecture, Escher, disproportional, bad anatomy, blurry, low quality, jpeg artifacts, watermark, text, signature"
+
+MODEL_VIDEO_BACKEND = {
+    "seedance": "seedance",
+    "doubao-seedance": "seedance",
+    "kling": "kling",
+    "kling-v1": "kling",
+    "kling-v1-6": "kling",
+    "kling-v2": "kling",
+    "kling-v2-master": "kling",
+    "kling-v2-1-master": "kling",
+    "kling-v2-5-turbo": "kling",
+    "kling-video-o1": "kling",
+    "runway": "runway",
+    "gen3": "runway",
+    "gen3-alpha": "runway",
+    "gen4": "runway",
+    "pika": "pika",
+    "pika-2": "pika",
+    "pika-2.2": "pika",
+    "luma": "luma",
+    "dream-machine": "luma",
+    "ray": "luma",
+    "ray2": "luma",
+}
+
+
+def _detect_video_backend(model_name: str) -> str:
+    """根据模型名检测使用哪个视频 backend"""
+    if not model_name:
+        return "seedance"
+    ml = model_name.lower()
+    for key, backend in MODEL_VIDEO_BACKEND.items():
+        if key in ml:
+            return backend
+    return "seedance"
 
 def _enrich_negative(negative: str) -> str:
     if QUALITY_NEGATIVE in negative:
@@ -242,6 +278,19 @@ def _resolve_ref_url(ref_url: str) -> str:
     return ref_url
 
 
+def _build_ref_prefix(reference_urls_by_type: dict) -> str:
+    prefix = ""
+    if reference_urls_by_type.get("style"):
+        prefix += "参考以下图片的整体视觉风格：色彩体系、渲染质感、光影倾向和艺术手法。不复制画面内容、构图或具体物体。\n"
+    if reference_urls_by_type.get("character"):
+        prefix += "参考以下角色的艺术呈现风格：面部刻画的细腻程度、皮肤与服装的材质质感、光影在人物身上的处理方式，以及整体的人物视觉品质。不要求复刻该角色的具体身份或外貌特征。\n"
+    if reference_urls_by_type.get("scene"):
+        prefix += "参考以下场景的艺术呈现风格：空间层次的构建方式、材质在环境中的表现质感、氛围与光影的空间处理手法。不要求复刻具体的场景布局或建筑结构。\n"
+    if reference_urls_by_type.get("prop"):
+        prefix += "参考以下道具的艺术呈现风格：材质质感与表面光泽的表现精度、细节雕刻的细腻程度、道具与光线的交互关系。不要求复刻该道具的具体形态或功能设定。\n"
+    return prefix
+
+
 def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
     """Generate images using the user's selected config. Returns (image_urls, actual_seed)."""
     if not agg or not agg.get("api_key"):
@@ -262,11 +311,6 @@ def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
 
     if reference_urls and not reference_urls_by_type:
         reference_urls_by_type = {"character": list(reference_urls)}
-    if reference_urls_by_type:
-        all_typed = []
-        for k in ("character", "scene", "prop"):
-            all_typed.extend(reference_urls_by_type.get(k, []))
-        reference_urls = all_typed
 
     extra_params = dict(getattr(req, "extra_params", {}) or {})
 
@@ -281,9 +325,10 @@ def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
     # 路径 1: Seedream / SeedEdit — 原生图生图，走 /images/generations + image 参数
     if "seedream" in model_lower or "seededit" in model_lower or "qwen-image-edit" in model_lower or "qwen-image-2" in model_lower:
         import requests as req_http
+        per_prompt = _build_ref_prefix(reference_urls_by_type) + prompt
         payload = {
             "model": model,
-            "prompt": prompt,
+            "prompt": per_prompt,
             "n": n,
             "size": size,
         }
@@ -337,14 +382,7 @@ def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
                 messages = []
                 if reference_content_parts:
                     messages.append({"role": "user", "content": reference_content_parts})
-                    prefix = ""
-                    if reference_urls_by_type.get("character"):
-                        prefix += "【人物参考图】请保持以上人物外貌、服装和角色比例特征。\n"
-                    if reference_urls_by_type.get("scene"):
-                        prefix += "【场景参考图】请保持以上场景空间结构和光影风格。\n"
-                    if reference_urls_by_type.get("prop"):
-                        prefix += "【道具参考图】请参考以上道具造型和材质。\n"
-                    user_text = (prefix + per_prompt) if prefix else per_prompt
+                    user_text = _build_ref_prefix(reference_urls_by_type) + per_prompt
                     if negative:
                         user_text = f"{user_text}\n\n避免：{negative}"
                     messages.append({"role": "user", "content": user_text})
@@ -390,56 +428,89 @@ def _call_image_api(req, agg: dict | None) -> tuple[list[str], int]:
             raise HTTPException(status_code=500, detail="Gemini 模型返回了内容但没有解析到图片数据")
         return urls, sd
 
-    # 路径 3: 其他 OpenAI 兼容模型（DALL-E、GPT-Image、Flux、Qwen 等）
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    # 路径 3: 通用聚合平台图生模型 — 走 /v1/chat/completions 出图
+    # 支持 flux、sdxl、playground、recraft、ideogram 等任何聚合平台上的图片模型
+    import requests as req_http
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    kwargs = {"model": model, "prompt": prompt, "n": n, "size": size}
-
+    image_prompt = prompt
     if negative:
-        kwargs["negative_prompt"] = negative
+        image_prompt = f"{prompt}\n\n避免以下内容：{negative}"
+    if reference_urls:
+        image_prompt = _build_ref_prefix(reference_urls_by_type) + image_prompt
 
-    if "dall-e-3" in model_lower:
-        kwargs["style"] = extra_params.get("style", "vivid")
-        kwargs["quality"] = extra_params.get("quality", "standard")
-
-    if "gpt-image" in model_lower and reference_urls:
+    urls = []
+    for i in range(n):
         try:
-            file_ids = []
-            for ref_url in reference_urls:
-                import requests as req_http2
-                import tempfile
-                resolved = _resolve_ref_url(ref_url)
-                if resolved.startswith("http"):
-                    resp = req_http2.get(resolved, timeout=30)
-                    resp.raise_for_status()
-                    img_bytes = resp.content
-                else:
-                    img_bytes = Path(resolved).read_bytes()
-                suffix = ".png"
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                    tmp.write(img_bytes)
-                    tmp_path = tmp.name
-                try:
-                    with open(tmp_path, "rb") as f:
-                        file_resp = client.files.create(file=f, purpose="vision")
-                        file_ids.append(file_resp.id)
-                finally:
-                    import os as os2
-                    os2.unlink(tmp_path)
-            if file_ids:
-                kwargs["file_ids"] = file_ids
-        except Exception:
-            pass
+            messages = []
+            if reference_urls and i == 0:
+                content_parts = [{"type": "text", "text": image_prompt}]
+                for ref_url in reference_urls[:3]:
+                    try:
+                        resolved = _resolve_ref_url(ref_url)
+                        if resolved.startswith("data:"):
+                            content_parts.insert(0, {"type": "image_url", "image_url": {"url": resolved}})
+                        elif resolved.startswith("http"):
+                            content_parts.insert(0, {"type": "image_url", "image_url": {"url": resolved}})
+                        else:
+                            with open(resolved, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode()
+                            content_parts.insert(0, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+                    except Exception:
+                        pass
+                messages.append({"role": "user", "content": content_parts})
+            else:
+                per_prompt = image_prompt if n == 1 else f"（第{i+1}/{n}张）{image_prompt}"
+                messages.append({"role": "user", "content": per_prompt})
 
-    kwargs["seed"] = sd
+            resp = req_http.post(
+                f"{base_url}/v1/chat/completions",
+                headers=headers,
+                json={"model": model, "messages": messages, "max_tokens": 4096},
+                timeout=300,
+            )
+            if resp.status_code == 404:
+                break
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            b64_matches = re.findall(r'data:image/[^;]+;base64,([^")\s]+)', content)
+            for b64_match in b64_matches:
+                try:
+                    img_data = base64.b64decode(b64_match)
+                    file_path = GENERATED_DIR / f"agg_{uuid.uuid4().hex[:8]}.png"
+                    file_path.write_bytes(img_data)
+                    urls.append(str(file_path))
+                except Exception:
+                    continue
+            url_matches = re.findall(r'(https?://[^\s<>"]+\.(?:png|jpg|jpeg|webp|gif))', content)
+            for img_url in url_matches:
+                try:
+                    local_path = _download_file(img_url, GENERATED_DIR, "agg_")
+                    urls.append(local_path)
+                except Exception:
+                    continue
+            if len(urls) >= n:
+                break
+        except Exception:
+            continue
+
+    if urls:
+        return urls, sd
+
+    # /v1/chat/completions 没出图，尝试 /v1/images/generations（OpenAI DALL-E 格式）
     try:
-        resp = client.images.generate(**kwargs)
-        return [img.url for img in resp.data], sd
+        payload = {"model": model, "prompt": prompt, "n": n, "size": size}
+        if negative:
+            payload["negative_prompt"] = negative
+        sd_val = extra_params.get("seed")
+        if sd_val is not None:
+            payload["seed"] = int(sd_val)
+        resp = req_http.post(f"{base_url}/v1/images/generations", headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        return [img["url"] for img in resp.json().get("data", [])], sd
     except Exception as e:
-        if "429" in str(e) or "RateLimit" in str(e):
-            raise HTTPException(status_code=429, detail=f"API 请求频率限制（429），请等待 30 秒后重试")
-        raise
+        raise HTTPException(status_code=500, detail=f"模型 {model} 不支持图片生成或调用失败: {str(e)[:200]}")
 
 
 @router.post("/image-gen/free")
@@ -479,6 +550,7 @@ def free_image_gen(req: FreeImageRequest):
                 "count": req.n,
                 "seed": actual_seed,
                 "reference_urls": req.reference_urls,
+                "reference_urls_by_type": req.reference_urls_by_type or {},
                 "timestamp": datetime.now().isoformat(),
             }
             meta_path = meta_dir / f"{filename}.json"
@@ -1014,18 +1086,31 @@ async def free_video_gen(
     agg = _get_active_agg_config("video")
     agg_key = agg.get("api_key") if agg else None
     agg_base = agg.get("base_url") if agg else None
+    effective_model = model or (agg.get("model") if agg else "") or ""
+    backend_name = _detect_video_backend(effective_model)
 
     try:
-        if not saved_paths:
-            # 文生视频
-            if agg_key and agg_base:
-                task_id = _call_seedance_text_to_video(prompt, resolution, duration, generate_audio, api_key=agg_key, base_url=agg_base, model=model, negative_prompt=negative_prompt)
+        if backend_name != "seedance" and agg_key and agg_base:
+            backend = create_video_backend(backend_name)
+            backend.api_key = agg_key
+            backend.base_url = agg_base
+            if not saved_paths:
+                task_id = backend.text_to_video(prompt, resolution, duration, generate_audio, model=effective_model, negative_prompt=negative_prompt)
             else:
-                task_id = _call_seedance_text_to_video(prompt, resolution, duration, generate_audio, model=model, negative_prompt=negative_prompt)
+                task_id = backend.image_to_video(saved_paths[0], prompt, resolution, duration, generate_audio, model=effective_model, negative_prompt=negative_prompt)
+            poll_result = backend.wait_for_result(task_id, timeout=600)
         else:
-            task_id = _call_seedance_image_to_video(saved_paths, prompt, resolution, duration, generate_audio, api_key=agg_key, base_url=agg_base, model=model, negative_prompt=negative_prompt)
-
-        poll_result = _poll_seedance(task_id, timeout=300)
+            if not saved_paths:
+                if agg_key and agg_base:
+                    task_id = _call_seedance_text_to_video(prompt, resolution, duration, generate_audio, api_key=agg_key, base_url=agg_base, model=model, negative_prompt=negative_prompt)
+                else:
+                    task_id = _call_seedance_text_to_video(prompt, resolution, duration, generate_audio, model=model, negative_prompt=negative_prompt)
+            else:
+                if agg_key and agg_base:
+                    task_id = _call_seedance_image_to_video(saved_paths, prompt, resolution, duration, generate_audio, api_key=agg_key, base_url=agg_base, model=model, negative_prompt=negative_prompt)
+                else:
+                    task_id = _call_seedance_image_to_video(saved_paths, prompt, resolution, duration, generate_audio, model=model, negative_prompt=negative_prompt)
+            poll_result = _poll_seedance(task_id, timeout=300)
         video_url = poll_result["video_url"]
         local_path = _download_file(video_url, GENERATED_DIR, "video_")
 
@@ -1077,10 +1162,105 @@ def _call_seedance_text_to_video(prompt: str, resolution: str = "1280x720", dura
     return backend.text_to_video(prompt, resolution, duration, generate_audio, model or backend.model, negative_prompt)
 
 
+def _call_agg_text_to_video(prompt: str, resolution: str, duration: int,
+                             model: str, api_key: str, base_url: str,
+                             negative_prompt: str = "") -> str:
+    """通用聚合平台文生视频 — 提交任务，返回 task_id"""
+    base = base_url.rstrip("/")
+    payload = {"model": model, "prompt": prompt, "resolution": resolution, "duration": duration}
+    if negative_prompt:
+        payload["negative_prompt"] = negative_prompt
+    resp = requests.post(
+        f"{base}/v1/video/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
+    if resp.status_code == 404:
+        resp = requests.post(
+            f"{base}/video/generations",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+    resp.raise_for_status()
+    return resp.json().get("task_id") or resp.json().get("id", "")
+
+
+def _call_agg_image_to_video(image_paths: list[str], prompt: str, resolution: str,
+                              duration: int, model: str, api_key: str, base_url: str,
+                              negative_prompt: str = "") -> str:
+    """通用聚合平台图生视频 — 提交任务，返回 task_id"""
+    import base64 as b64mod
+    base = base_url.rstrip("/")
+    images_b64 = []
+    for p in image_paths[:1]:
+        with open(p, "rb") as f:
+            images_b64.append(b64mod.b64encode(f.read()).decode())
+    payload = {
+        "model": model, "prompt": prompt, "resolution": resolution,
+        "duration": duration, "images": images_b64,
+    }
+    if negative_prompt:
+        payload["negative_prompt"] = negative_prompt
+    resp = requests.post(
+        f"{base}/v1/video/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
+    if resp.status_code == 404:
+        resp = requests.post(
+            f"{base}/video/generations",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+    resp.raise_for_status()
+    return resp.json().get("task_id") or resp.json().get("id", "")
+
+
+def _poll_agg_video(api_key: str, base_url: str, task_id: str, timeout: int = 600) -> dict:
+    """轮询聚合平台视频任务直到完成"""
+    base = base_url.rstrip("/")
+    start = time.time()
+    while time.time() - start < timeout:
+        resp = requests.get(
+            f"{base}/v1/video/result/{task_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            resp = requests.get(
+                f"{base}/video/result/{task_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30,
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            status = data.get("status", "")
+            if status in ("completed", "succeeded", "done"):
+                video_url = data.get("video_url") or data.get("url") or ""
+                if not video_url:
+                    outputs = data.get("output", {}) or data.get("results", [])
+                    if isinstance(outputs, list) and outputs:
+                        video_url = outputs[0].get("video_url") or outputs[0].get("url", "")
+                    elif isinstance(outputs, dict):
+                        video_url = outputs.get("video_url") or outputs.get("url", "")
+                if video_url:
+                    return {"video_url": video_url}
+            elif status in ("failed", "error"):
+                raise Exception(f"视频生成失败: {data.get('error', '')}")
+        time.sleep(5)
+    raise Exception(f"视频生成超时 ({timeout}s)，task_id: {task_id}")
+
+
 @router.get("/video-gen/resolutions")
 def list_video_resolutions(model: str = Query(default="")):
     resolutions = _get_video_resolutions(model)
-    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions)}
+    from tools.model_registry import get_video_durations
+    durations = get_video_durations(model) if model else [5, 10]
+    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions), "durations": durations}
 
 
 @router.get("/gen-files/projects/{project_name}/{subpath:path}")
@@ -1265,7 +1445,15 @@ async def generate_project_shot(project_name: str, data: dict):
     scene_label = data.get("scene_label", "默认场")
 
     from tools.video_api import create_video_backend
-    backend = create_video_backend("seedance")
+    model = data.get("model", "")
+    agg = _get_active_agg_config("video")
+    agg_model = agg.get("model", "") if agg else ""
+    backend_name = _detect_video_backend(model or agg_model)
+    backend = create_video_backend(backend_name)
+    if agg and agg.get("api_key"):
+        backend.api_key = agg["api_key"]
+    if agg and agg.get("base_url"):
+        backend.base_url = agg["base_url"].rstrip("/")
 
     project = ProjectManager(project_name)
 
@@ -1684,3 +1872,86 @@ async def upscale_image(data: dict):
     finally:
         if os.path.exists(img_path) and not img_path.startswith(str(GENERATED_DIR)):
             os.unlink(img_path)
+
+
+@router.get("/assets/list")
+def list_assets(project_name: str = Query(...), asset_type: str = Query("角色")):
+    """列出指定类型的资产（角色/场景/道具）"""
+    from core.asset_manager import AssetManager
+    mgr = AssetManager(PROJECTS_DIR / project_name)
+    return {"assets": mgr.list_assets(asset_type)}
+
+
+@router.post("/assets/confirm-version")
+def confirm_asset_version(
+    project_name: str = Query(...),
+    asset_type: str = Query(...),
+    asset_name: str = Query(...),
+    version: int = Query(...)
+):
+    """确认资产版本"""
+    from core.asset_manager import AssetManager
+    mgr = AssetManager(PROJECTS_DIR / project_name)
+    mgr.confirm_version(asset_type, asset_name, version)
+    return {"status": "ok", "confirmed_version": version}
+
+
+@router.post("/assets/modify")
+def modify_asset_endpoint(
+    project_name: str = Query(...),
+    asset_type: str = Query(...),
+    asset_name: str = Query(...),
+    variant: str = Query("基础形象"),
+    prompt: str = Query(...),
+    negative_prompt: str = Query(""),
+    strength: float = Query(0.7, ge=0.0, le=1.0),
+    model: str = Query(""),
+    save_as: str = Query("variant"),
+    new_asset_name: str = Query("")
+):
+    """图生图：基于参考图修改资产
+    Args:
+        save_as: "variant" (存为版本) 或 "new_asset" (存为新资产)
+        new_asset_name: save_as=new_asset 时必填
+    """
+    from core.asset_manager import AssetManager
+    from core.image_pipeline import ImagePipeline
+    
+    project_dir = PROJECTS_DIR / project_name
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    if asset_type not in ["角色", "场景", "道具"]:
+        raise HTTPException(status_code=400, detail="asset_type 必须是 角色/场景/道具")
+    
+    if save_as not in ["variant", "new_asset"]:
+        raise HTTPException(status_code=400, detail="save_as 必须是 variant 或 new_asset")
+    
+    if save_as == "new_asset" and not new_asset_name:
+        raise HTTPException(status_code=400, detail="save_as=new_asset 时必须提供 new_asset_name")
+    
+    pipeline = ImagePipeline(project_dir)
+    result = pipeline.modify_asset(
+        asset_type=asset_type,
+        asset_name=asset_name,
+        prompt=prompt,
+        variant=variant,
+        negative_prompt=negative_prompt,
+        strength=strength,
+        model=model,
+        save_as=save_as,
+        new_asset_name=new_asset_name
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    # 返回带访问URL
+    from pathlib import Path
+    rel_path = Path(result["path"]).relative_to(project_dir)
+    result["url"] = f"/api/projects/{project_name}/assets/{asset_type}/{rel_path.name}"
+    result["model_info"] = {
+        "max_ref_images": 1,
+        "supports_img2img": True
+    }
+    return result

@@ -232,16 +232,20 @@ class ScreenplayWriter(AgentBase):
                                writing_style_name, script_style_name,
                                story_type_name, style, feedback):
         script_format_name = {"1": "系统格式", "2": "市场格式"}.get(style.script_format, "系统格式")
-        count_prompt = (
-            f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
-            f"只输出一个整数。\n\n{input_content[:3000]}"
-        )
-        count_text = ""
-        for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
-            count_text += token
-        nums = re.findall(r'\d+', count_text)
-        chunk_count = int(nums[0]) if nums else 3
-        chunk_count = max(1, min(chunk_count, 20))
+        if style.episode_count and style.episode_count.isdigit() and int(style.episode_count) > 0:
+            chunk_count = int(style.episode_count)
+            chunk_count = max(1, min(chunk_count, 20))
+        else:
+            count_prompt = (
+                f"以下是一段剧情描述。请判断应该分为几集/几章来写剧本。"
+                f"只输出一个整数。\n\n{input_content[:3000]}"
+            )
+            count_text = ""
+            for token in self.call_llm_stream(count_prompt, "", temperature=0.3):
+                count_text += token
+            nums = re.findall(r'\d+', count_text)
+            chunk_count = int(nums[0]) if nums else 3
+            chunk_count = max(1, min(chunk_count, 20))
         iterator.set_auto_blocks(chunk_count)
 
         self._plot_infos = []

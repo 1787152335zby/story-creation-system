@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Plus, ArrowLeft, Sparkles, Pencil, Trash2, Check, X, ExternalLink, FolderOpen } from 'lucide-react'
+import { Search, Plus, ArrowLeft, Sparkles, Pencil, Trash2, Check, X, ExternalLink, FolderOpen, Download, Loader2 } from 'lucide-react'
 import * as THREE from 'three'
 import { fetchProjects, deleteProject, renameProject, openProjectFolder } from '../lib/api'
 import { getPhaseNames } from '../lib/constants'
@@ -62,6 +62,11 @@ export default function AllProjectsPage() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [exportTarget, setExportTarget] = useState<string | null>(null)
+  const [exportPhases, setExportPhases] = useState<{dir: string; label: string; has_content: boolean; files?: {name: string; label: string}[]}[]>([])
+  const [selectedPhases, setSelectedPhases] = useState<Set<string>>(new Set())
+  const [loadingPhases, setLoadingPhases] = useState(false)
+  const [exportMode, setExportMode] = useState<'merge' | 'split'>('merge')
   const [hoveredStar, setHoveredStar] = useState<string | null>(null)
   const [bursts, setBursts] = useState<BurstParticle[]>([])
   const [selectedProject, setSelectedProject] = useState<ProjectInfo | null>(null)
@@ -458,7 +463,7 @@ export default function AllProjectsPage() {
       {/* ═══ Card list view ═══ */}
       {viewMode === 'cards' && filtered.length > 0 && (
         <div className="fixed inset-0 z-10 overflow-y-auto" style={{ top: 0, paddingBottom: '80px' }}>
-          <div className="max-w-3xl mx-auto px-4 pt-52 pb-6 space-y-2">
+          <div className="max-w-5xl mx-auto px-4 pt-52 pb-6 space-y-2">
             {filtered.map((p, i) => {
               const status = starStatus(p)
               const c = COLORS[status]
@@ -530,6 +535,16 @@ export default function AllProjectsPage() {
                       <button onClick={e => { e.stopPropagation(); navigate(`/project/${encodeURIComponent(p.name)}`) }}
                         className="p-action-btn p-1.5 rounded-lg hover:bg-white/[0.04] text-white/30" title="打开">
                         <ExternalLink className="w-3 h-3" />
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setExportTarget(p.name); setSelectedPhases(new Set()); setExportMode('merge'); setLoadingPhases(true);
+                        fetch(`/api/projects/${encodeURIComponent(p.name)}/phases`).then(r => r.json()).then(d => {
+                          setExportPhases(d.phases || []);
+                          setSelectedPhases(new Set((d.phases || []).map((ph: any) => ph.dir)));
+                          setLoadingPhases(false);
+                        }).catch(() => setLoadingPhases(false))
+                      }}
+                          className="p-action-btn p-1.5 rounded-lg hover:bg-blue-500/[0.10] text-white/30 hover:text-blue-400/70" title="导出">
+                        <Download className="w-3 h-3" />
                       </button>
                       <button onClick={e => { e.stopPropagation(); setDeleteTarget(p.name) }}
                           className="p-action-btn p-1.5 rounded-lg hover:bg-red-500/[0.08] text-white/30 hover:text-red-400/60" title="删除">
@@ -876,6 +891,16 @@ export default function AllProjectsPage() {
                       className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.06] text-[10px] text-white/55 hover:text-white/70 hover:bg-white/[0.03] transition-all">
                       <FolderOpen className="w-2.5 h-2.5" /> 文件夹
                     </button>
+                    <button onClick={() => { setExportTarget(p.name); setSelectedPhases(new Set()); setExportMode('merge'); setLoadingPhases(true);
+                      fetch(`/api/projects/${encodeURIComponent(p.name)}/phases`).then(r => r.json()).then(d => {
+                        setExportPhases(d.phases || []);
+                        setSelectedPhases(new Set((d.phases || []).map((ph: any) => ph.dir)));
+                        setLoadingPhases(false);
+                      }).catch(() => setLoadingPhases(false))
+                    }}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.06] text-[10px] text-blue-400/65 hover:text-blue-400/85 hover:bg-blue-500/[0.06] transition-all">
+                      <Download className="w-2.5 h-2.5" /> 导出
+                    </button>
                     <button onClick={() => setDeleteTarget(p.name)}
                       className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-white/[0.06] text-[10px] text-red-400/55 hover:text-red-400/80 hover:bg-red-500/[0.08] transition-all">
                       <Trash2 className="w-2.5 h-2.5" /> 删除
@@ -934,6 +959,93 @@ export default function AllProjectsPage() {
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-xl text-xs text-white/55 hover:text-white/70 transition-all">取消</button>
               <button onClick={handleDelete} className="px-4 py-2 rounded-xl text-xs bg-red-500/15 text-red-400/70 hover:bg-red-500/25 hover:text-red-400 transition-all">删除</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export dialog */}
+      {exportTarget && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={() => setExportTarget(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative z-10 w-[420px] max-h-[85vh] rounded-2xl p-6 overflow-y-auto"
+            style={{ background: 'rgba(18,18,24,0.96)', border: '1px solid rgba(255,255,255,0.10)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-white/80">导出「{exportTarget}」</h3>
+              <button onClick={() => setExportTarget(null)} className="p-1 rounded-lg hover:bg-white/[0.04] text-white/30"><X className="w-4 h-4" /></button>
+            </div>
+            {loadingPhases ? (
+              <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-white/20" /></div>
+            ) : exportPhases.length === 0 ? (
+              <p className="text-xs text-white/30 py-4">该项目暂无内容可导出</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-1 mb-4 p-0.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <button onClick={() => { setExportMode('merge'); setSelectedPhases(new Set(exportPhases.map(p => p.dir))) }}
+                    className={`flex-1 py-1.5 rounded-md text-[11px] font-medium transition-all ${exportMode === 'merge' ? 'bg-white/[0.08] text-white/80' : 'text-white/30'}`}>汇总为一个文件</button>
+                  <button onClick={() => { setExportMode('split'); setSelectedPhases(new Set(exportPhases.map(p => p.dir))) }}
+                    className={`flex-1 py-1.5 rounded-md text-[11px] font-medium transition-all ${exportMode === 'split' ? 'bg-white/[0.08] text-white/80' : 'text-white/30'}`}>分集导出</button>
+                </div>
+                {exportMode === 'merge' ? (
+                  <>
+                    <p className="text-[11px] text-white/30 mb-3">勾选阶段，合并为单个 Word</p>
+                    <div className="flex items-center gap-2 mb-3">
+                      <button className="text-[10px] px-2 py-1 rounded text-blue-400/70 hover:bg-blue-400/[0.06]" onClick={() => setSelectedPhases(new Set(exportPhases.map(p => p.dir)))}>全选</button>
+                      <span className="text-white/10">·</span>
+                      <button className="text-[10px] px-2 py-1 rounded text-white/25 hover:bg-white/[0.03]" onClick={() => setSelectedPhases(new Set())}>取消全选</button>
+                    </div>
+                    <div className="space-y-1 mb-5">
+                      {exportPhases.map(ph => (
+                        <label key={ph.dir} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all ${selectedPhases.has(ph.dir) ? 'bg-blue-500/[0.08]' : 'hover:bg-white/[0.02]'}`}>
+                          <div className={`w-4 h-4 rounded flex items-center justify-center border flex-shrink-0 transition-all ${selectedPhases.has(ph.dir) ? 'bg-blue-500/80 border-blue-500/60' : 'border-white/[0.12]'}`}>
+                            {selectedPhases.has(ph.dir) && <Check className="w-2.5 h-2.5 text-white" />}
+                          </div>
+                          <input type="checkbox" className="hidden" checked={selectedPhases.has(ph.dir)} onChange={() => { const n = new Set(selectedPhases); if (n.has(ph.dir)) n.delete(ph.dir); else n.add(ph.dir); setSelectedPhases(n) }} />
+                          <span className="text-xs text-white/60 flex-1">{ph.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <a href={`/api/projects/${encodeURIComponent(exportTarget)}/export-batch?phases=${encodeURIComponent([...selectedPhases].join(','))}`} target="_blank" rel="noopener noreferrer"
+                      className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-medium transition-all ${selectedPhases.size === 0 ? 'pointer-events-none opacity-30' : ''}`}
+                      style={{ background: 'rgba(59,130,246,0.20)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
+                      onClick={() => { setTimeout(() => setExportTarget(null), 500) }}>
+                      <Download className="w-3.5 h-3.5" /> 导出 {selectedPhases.size} 个阶段
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-white/30 mb-3">点击文件名单独下载，或「全部下载」合并为该阶段的 Word</p>
+                    <div className="space-y-3 mb-5 max-h-[50vh] overflow-y-auto">
+                      {exportPhases.map(ph => (
+                        <div key={ph.dir}>
+                          <div className="flex items-center gap-2 mb-1 px-1">
+                            <span className="text-[10px] text-white/40 font-medium">{ph.label}</span>
+                            <span className="text-[9px] text-white/15">({(ph.files || []).length})</span>
+                            {ph.has_content && (
+                              <a target="_blank" rel="noopener noreferrer"
+                                href={`/api/projects/${encodeURIComponent(exportTarget)}/export-phase?phase=${encodeURIComponent(ph.dir)}`}
+                                className="ml-auto text-[9px] px-2 py-0.5 rounded text-blue-300/70 hover:bg-blue-500/[0.10] transition-all border border-blue-400/[0.12]">
+                                📥 全部下载
+                              </a>
+                            )}
+                          </div>
+                          <div className="space-y-0.5 pl-3 border-l border-white/[0.04]">
+                            {(ph.files || []).length === 0 ? <span className="text-[10px] text-white/15 pl-2">无文件</span> :
+                              (ph.files || []).map(f => (
+                                <a key={f.name} target="_blank" rel="noopener noreferrer"
+                                  href={`/api/projects/${encodeURIComponent(exportTarget)}/export-single?phase=${encodeURIComponent(ph.dir)}&file=${encodeURIComponent(f.name)}`}
+                                  className="flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-blue-300/70 hover:bg-blue-500/[0.08] hover:text-blue-300 transition-all">
+                                  <Download className="w-2.5 h-2.5 flex-shrink-0" /><span className="truncate">{f.label}</span>
+                                </a>
+                              ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

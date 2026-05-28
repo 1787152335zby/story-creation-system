@@ -167,15 +167,15 @@ VIDEO_MODELS = {
     "seedance": {
         "name": "火山引擎",
         "models": [
-            {"value": "doubao-seedance-2-0-pro-260613", "label": "Seedance 2.0 Pro", "resolutions": _res(
+            {"value": "doubao-seedance-2-0-pro-260613", "label": "Seedance 2.0 Pro", "durations": [5, 10, 15], "resolutions": _res(
                 "1024x1024", "540x960", "720x1280", "1280x720", "1920x1080")},
-            {"value": "doubao-seedance-2-0-fast-260128", "label": "Seedance 2.0 Fast", "resolutions": _res(
+            {"value": "doubao-seedance-2-0-fast-260128", "label": "Seedance 2.0 Fast", "durations": [5, 10, 15], "resolutions": _res(
                 "1024x1024", "540x960", "720x1280", "1280x720")},
-            {"value": "doubao-seedance-1-5-pro-251215", "label": "Seedance 1.5 Pro", "resolutions": _res(
+            {"value": "doubao-seedance-1-5-pro-251215", "label": "Seedance 1.5 Pro", "durations": [5, 10, 15], "resolutions": _res(
                 "1024x1024", "540x960", "720x1280", "1280x720", "1920x1080")},
-            {"value": "doubao-seedance-1-0-pro-250528", "label": "Seedance 1.0 Pro", "resolutions": _res(
+            {"value": "doubao-seedance-1-0-pro-250528", "label": "Seedance 1.0 Pro", "durations": [5, 10], "resolutions": _res(
                 "1024x1024", "540x960", "720x1280", "1280x720", "1920x1080")},
-            {"value": "doubao-seedance-1-0-pro-fast-251015", "label": "Seedance 1.0 Pro Fast", "resolutions": _res(
+            {"value": "doubao-seedance-1-0-pro-fast-251015", "label": "Seedance 1.0 Pro Fast", "durations": [5, 10], "resolutions": _res(
                 "1024x1024", "540x960", "720x1280", "1280x720", "1920x1080")},
         ]
     },
@@ -435,6 +435,21 @@ def get_image_resolutions(model_id: str) -> list[str]:
 
 def get_video_resolutions(model_id: str) -> list[str]:
     return _infer_video_resolutions(model_id)
+
+
+def get_video_durations(model_id: str) -> list[int]:
+    """Return supported durations for a video model, defaults to [5, 10]."""
+    model_id_l = model_id.lower()
+    for provider_id, provider in VIDEO_MODELS.items():
+        if provider_id in model_id_l or any(kw in model_id_l for kw in provider_id.split("_")):
+            for m in provider["models"]:
+                if m["value"] == model_id or (m["value"] in model_id_l or model_id_l in m["value"]):
+                    return m.get("durations", [5, 10])
+    for provider in VIDEO_MODELS.values():
+        for m in provider["models"]:
+            if any(kw in model_id_l for kw in m["value"].lower().split("-")[:3]):
+                return m.get("durations", [5, 10])
+    return [5, 10]
 
 
 # =============================================================================

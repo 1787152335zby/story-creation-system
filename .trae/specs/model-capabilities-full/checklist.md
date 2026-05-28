@@ -1,0 +1,21 @@
+- [x] `FreeImageRequest.extra_params` 字段存在且可接收 cfg_scale、seed、style、quality
+- [x] `ProjectImageRequest.extra_params` 字段存在
+- [x] Seedream 模型不走 OpenAI SDK，走 raw POST
+- [x] Seedream payload 中包含 `cfg_scale`（默认 7.0）
+- [x] Seedream payload 中支持 `seed`（从 extra_params 读取）
+- [x] Seedream 使用 dynamic model 而非硬编码 "seedream-v1"
+- [x] DALL-E 3 调用中传入 `style`（默认 "vivid"）
+- [x] DALL-E 3 调用中传入 `quality`（默认 "standard"）
+- [x] GPT-Image-1 有参考图时：上传到 OpenAI 获取 file_id，传入 `file_ids`
+- [x] GPT-Image-1 有参考图时：prompt 不拼"保持参考图风格"文字
+- [x] GPT-Image-1 无参考图时：保持原有行为不变
+- [x] 非 Gemini 路径中 `negative_prompt` 实际传递到 API payload
+- [x] `_call_seedance_text_to_video` 接受 `model` 参数
+- [x] `_call_seedance_image_to_video` 接受 `model` 参数
+- [x] `SeedanceBackend.text_to_video` 接受 `model` 参数
+- [x] `SeedanceBackend.image_to_video` 接受 `model` 参数
+- [x] `VideoBackend` 基类签名更新（text_to_video + image_to_video 加 model）
+- [x] `free_video_gen` 路由传入用户选择的 model
+- [x] `generate_project_shot` 路由传入 model
+- [x] Seedance 视频 payload 中支持 `negative_prompt`
+- [x] Python 编译通过

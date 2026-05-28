@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import json
 import logging
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from core.content_validator import validate_content
 from core.continuity import extract_continuity, save_continuity, load_last_continuity, generate_continuity_injection
 from core.qc_gates import run_qc_check
 from core.agent_factory import create_agent
+from core.visual_bible import VisualBibleExtractor
 
 from .ws_manager import ConnectionManager
 
@@ -110,6 +112,9 @@ class AsyncOrchestrator:
             if project.pending_episode is not None:
                 await self.continue_run(project_name, style_data)
                 return
+            if project.config.get("_version_selected"):
+                await self.continue_run(project_name, style_data)
+                return
 
             await self.ws.send_message(project_name, {
                 "type": "progress", "current": 0, "total": total,
@@ -204,6 +209,7 @@ class AsyncOrchestrator:
                     # 方向卡生成，不发送 phase_complete
                     direction_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, idx)
                     direction_output = self._reorder_chunked_stream(agent, direction_output, project_name, idx)
+                    project.write_output(output_path, direction_output)
 
                     # 方向卡生成完成，等待用户选择版本
                     await self.ws.send_message(project_name, {
@@ -214,6 +220,8 @@ class AsyncOrchestrator:
                     version_result = await self._wait_for_version(project_name)
                     version_choice = version_result.get("version", "1")
                     project.clear_pending_version()
+                    project.config["_version_selected"] = version_choice
+                    project.save_config()
 
                     # 用户已选择，开始生成完整大纲
                     version_letter = "A" if version_choice == "1" else "B"
@@ -237,6 +245,8 @@ class AsyncOrchestrator:
                             existing_full_parts=existing_full_parts
                         )
                         if cr.get("confirmed"):
+                            project.config.pop("_version_selected", None)
+                            project.save_config()
                             project.mark_phase_done(idx)
                             project.clear_pending_approval()
                             await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
@@ -253,6 +263,9 @@ class AsyncOrchestrator:
                         full_output = await self._run_agent_in_thread(agent, project, style, second_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
+
+                    project.config.pop("_version_selected", None)
+                    project.save_config()
 
                     await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
@@ -422,11 +435,10 @@ class AsyncOrchestrator:
                         break
                     if resumed:
                         continue
-                    # 文件不存在 → 要么是初始回入（用户退首页再回来），要么是点了继续生成
+                    # 文件不存在 → 直接从 pending_ep 的索引继续生成
                     auto_resume = project.config.pop("_proceed_resume", False)
                     project.save_config()
                     if auto_resume:
-                        # 用户点了"继续生成下一集" → 降级到正常生成流程
                         chunk_resume_ci = pending_ep["chunk_index"]
                         chunk_files = pending_ep.get("chunk_files", [])
                         parts = []
@@ -437,40 +449,15 @@ class AsyncOrchestrator:
                         if parts:
                             existing_full_parts = parts
                     else:
-                        # 初始回入 → 先重放已有集的内容，再显示暂停状态
+                        chunk_resume_ci = pending_ep["chunk_index"]
                         chunk_files = pending_ep.get("chunk_files", [])
-                        base_stem = Path(output_path).stem
-                        parent_dir = str(Path(output_path).parent)
-                        for i, cf in enumerate(chunk_files):
-                            # 如果是相对路径，拼上 parent
-                            full_cf = cf if parent_dir == "." or cf.startswith(parent_dir) or '/' in cf else f"{parent_dir}/{cf}"
-                            content = project.read_output(full_cf) or ""
+                        parts = []
+                        for cf in chunk_files:
+                            content = project.read_output(cf) or ""
                             if content:
-                                await self.ws.send_message(project_name, {
-                                    "type": "chunk_saved",
-                                    "phase_index": idx,
-                                    "chunk_name": f"第{i+1}集",
-                                    "chunk_index": i,
-                                    "total_chunks": pending_ep.get("total_chunks", 0),
-                                    "file_path": full_cf,
-                                })
-                        # 重放最后一集的内容作为当前显示
-                        if chunk_files:
-                            last_cf = chunk_files[-1] if parent_dir == "." or chunk_files[-1].startswith(parent_dir) or '/' in chunk_files[-1] else f"{parent_dir}/{chunk_files[-1]}"
-                            last_content = project.read_output(last_cf) or ""
-                            if last_content:
-                                await self.ws.send_message(project_name, {"type": "stream_clear"})
-                                await self.ws.send_message(project_name, {
-                                    "type": "stream", "phase_index": idx,
-                                    "chunk": last_content,
-                                })
-                        await self.ws.send_message(project_name, {
-                            "type": "phase_paused",
-                            "phase_index": idx,
-                            "phase_name": phase.name,
-                        })
-                        paused_phase = True
-                        break
+                                parts.append(content)
+                        if parts:
+                            existing_full_parts = parts
                 # 对于大纲阶段，即使有现有内容也不跳过，因为我们需要重新走两阶段流程
                 if not is_outline:
                     # 如果后面还有 pending_episode，当前阶段有内容就直接标记完成，不弹审核
@@ -513,12 +500,64 @@ class AsyncOrchestrator:
                 is_outline = phase.agent == "outline_designer"
 
                 if is_outline:
-                    # 大纲阶段：先生成方向卡，不保存完整文件
-                    # 方向卡生成，不发送 phase_complete
+                    vs = project.config.get("_version_selected")
+                    if vs and project.read_output(output_path):
+                        version_letter = "A" if vs == "1" else "B"
+                        second_input = f"\n\n## 用户选择\n请生成版本{version_letter}的完整大纲。"
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_start", "phase_index": idx,
+                            "phase_name": phase.name, "total_phases": total,
+                        })
+                        full_output = await self._run_agent_in_thread(agent, project, style, second_input, project_name, idx)
+                        full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
+                        project.write_output(output_path, full_output)
+                        project.config.pop("_version_selected", None)
+                        project.save_config()
+                        await self._check_qc_and_notify(project, project_name, idx, phase.agent)
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_complete", "phase_index": idx,
+                            "phase_name": phase.name, "file_path": output_path,
+                        })
+                        await self.ws.send_message(project_name, {
+                            "type": "version_applied",
+                            "phase_index": idx,
+                            "version": version_letter,
+                        })
+                        await self.ws.send_message(project_name, {
+                            "type": "awaiting_approval",
+                            "phase_index": idx,
+                        })
+                        project.set_pending_approval(idx)
+                        approval = await self.ws.wait_for_approval(project_name, idx)
+                        iterations = 0
+                        while not approval.get("approved") and iterations < 5:
+                            feedback = approval.get("feedback", "")
+                            if not feedback:
+                                project.clear_pending_approval()
+                                break
+                            revised_input = second_input + "\n\n## 修改意见\n" + feedback
+                            full_output = await self._run_agent_in_thread(agent, project, style, revised_input, project_name, idx)
+                            full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
+                            project.write_output(output_path, full_output)
+                            await self._check_qc_and_notify(project, project_name, idx, phase.agent)
+                            await self.ws.send_message(project_name, {
+                                "type": "phase_complete", "phase_index": idx,
+                                "phase_name": phase.name, "file_path": output_path,
+                            })
+                            approval = await self.ws.wait_for_approval(project_name, idx)
+                            iterations += 1
+                        if approval.get("approved"):
+                            project.mark_phase_done(idx)
+                        project.clear_pending_approval()
+                        if approval.get("confirmed"):
+                            await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
+                            break
+                        continue
+
                     direction_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, idx)
                     direction_output = self._reorder_chunked_stream(agent, direction_output, project_name, idx)
+                    project.write_output(output_path, direction_output)
 
-                    # 方向卡生成完成，等待用户选择版本
                     await self.ws.send_message(project_name, {
                         "type": "awaiting_version",
                         "phase_index": idx,
@@ -527,6 +566,8 @@ class AsyncOrchestrator:
                     version_result = await self._wait_for_version(project_name)
                     version_choice = version_result.get("version", "1")
                     project.clear_pending_version()
+                    project.config["_version_selected"] = version_choice
+                    project.save_config()
 
                     # 用户已选择，开始生成完整大纲
                     version_letter = "A" if version_choice == "1" else "B"
@@ -549,6 +590,8 @@ class AsyncOrchestrator:
                             existing_full_parts=existing_full_parts
                         )
                         if cr.get("confirmed"):
+                            project.config.pop("_version_selected", None)
+                            project.save_config()
                             project.mark_phase_done(idx)
                             project.clear_pending_approval()
                             await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
@@ -565,6 +608,9 @@ class AsyncOrchestrator:
                         full_output = await self._run_agent_in_thread(agent, project, style, second_input, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
+
+                    project.config.pop("_version_selected", None)
+                    project.save_config()
 
                     await self._check_qc_and_notify(project, project_name, idx, phase.agent)
                     await self.ws.send_message(project_name, {
@@ -1333,6 +1379,27 @@ class AsyncOrchestrator:
                 logger.info(f"ContinuityLog 已提取: {display_name}")
             except Exception as e:
                 logger.warning(f"ContinuityLog 提取失败 ({display_name}): {e}")
+
+            if "完整剧本" in output_path:
+                try:
+                    inc_result = VisualBibleExtractor.extract_incremental(chunk_output)
+                    if inc_result.get("characters") or inc_result.get("scenes"):
+                        inc_dir = project.project_dir / "04_角色场景" / "_incremental"
+                        inc_dir.mkdir(parents=True, exist_ok=True)
+                        inc_file = inc_dir / f"{display_name}.json"
+                        inc_file.write_text(json.dumps(inc_result, ensure_ascii=False, indent=2), encoding="utf-8")
+                        char_count = len(inc_result.get("characters", []))
+                        scene_count = len(inc_result.get("scenes", []))
+                        await self.ws.send_message(project_name, {
+                            "type": "visual_incremental",
+                            "phase_index": phase_index,
+                            "chunk_name": display_name,
+                            "char_count": char_count,
+                            "scene_count": scene_count,
+                            "message": f"已提取 {display_name} 的 {char_count} 个角色、{scene_count} 个场景",
+                        })
+                except Exception as e:
+                    logger.warning(f"增量视觉提取失败 ({display_name}): {e}")
 
             # 持久化逐集审核状态（刷新后可恢复）
             project.set_pending_episode(phase_index, ci, display_name, chunk_count, chunk_files=[chunk_fname])

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Download, Trash2, Loader2 } from 'lucide-react'
+import Starfield from '../components/Starfield'
 import ConfirmModal from '../components/ConfirmModal'
 import { fetchGenerationHistory, deleteGeneratedFile, fetchGenerationHistoryItem } from '../lib/api'
 import ImagePreview from '../components/ImagePreview'
@@ -122,10 +123,7 @@ export default function HistoryPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, hsl(170, 70%, 55%), transparent 70%)' }} />
-      </div>
+      <Starfield />
       <div className="max-w-6xl mx-auto px-6 py-10 relative z-10">
         <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground mb-8 transition-colors">
           <ArrowLeft className="w-4 h-4" /> 返回首页

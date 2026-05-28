@@ -21,3 +21,41 @@ aggregated_configs.json
 .node/
 *.bak
 *.bak2
+
+# Temp/debug scripts
+_*.py
+_*.ps1
+test_*.py
+test_server.py
+test_debug.py
+test_fix.py
+test_format.py
+test_api.ps1
+debug_*.py
+debug_*.ps1
+check_*.py
+check_*.ps1
+compare_*.py
+compare_*.ps1
+fetch_*.ps1
+display_*.ps1
+decode_*.py
+decode_and_notify.py
+execute_*.ps1
+find_*.ps1
+run_*.py
+run_*.ps1
+
+# Uumit temp
+uumit_*
+
+# Style preview
+style-preview/
+
+# Non-python servers
+server.cjs
+server.js
+
+# Test HTML
+threejs-water-test.html
+gpu-test.html

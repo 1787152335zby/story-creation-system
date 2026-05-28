@@ -128,6 +128,348 @@ def save_phase_content(name: str, phase: str, body: dict):
     return {"saved": True, "path": phase, "size": len(content)}
 
 
+def _md_to_html(text: str) -> str:
+    is_table = False
+    lines_out = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            if is_table:
+                lines_out.append("</table>")
+                is_table = False
+            lines_out.append("<br/>")
+            continue
+        if stripped.startswith("### "):
+            if is_table:
+                lines_out.append("</table>")
+                is_table = False
+            lines_out.append(f"<h3>{_inline_md(stripped[4:])}</h3>")
+        elif stripped.startswith("## "):
+            if is_table:
+                lines_out.append("</table>")
+                is_table = False
+            lines_out.append(f"<h2>{_inline_md(stripped[3:])}</h2>")
+        elif stripped.startswith("# "):
+            if is_table:
+                lines_out.append("</table>")
+                is_table = False
+            lines_out.append(f"<h1>{_inline_md(stripped[2:])}</h1>")
+        elif stripped.startswith("|") and stripped.endswith("|"):
+            if not is_table:
+                lines_out.append('<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse">')
+                is_table = True
+            cells = stripped.split("|")[1:-1]
+            tag = "th" if re.match(r'^[\s\-:|]+$', stripped) else "td"
+            if tag == "th":
+                continue
+            row = "".join(f"<{tag}>{_inline_md(c.strip())}</{tag}>" for c in cells)
+            lines_out.append(f"<tr>{row}</tr>")
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            lines_out.append(f"<li>{_inline_md(stripped[2:])}</li>")
+        elif stripped == "---":
+            lines_out.append("<hr/>")
+        else:
+            lines_out.append(f"<p>{_inline_md(stripped)}</p>")
+    if is_table:
+        lines_out.append("</table>")
+    return "\n".join(lines_out)
+
+
+def _inline_md(text: str) -> str:
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', text)
+    return text
+
+
+@router.get("/projects/{name}/{phase:path}/export-docx")
+def export_phase_docx(name: str, phase: str):
+    from fastapi.responses import Response
+    project_dir = PROJECTS_DIR / name
+    phase_path = project_dir / phase
+    if not phase_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    if phase_path.is_dir():
+        root_md = list(phase_path.glob("*.md"))
+        sub_md = []
+        for subdir in sorted(phase_path.iterdir()):
+            if subdir.is_dir():
+                sub_md.extend(subdir.glob("*.md"))
+        md_files = root_md + sub_md
+        md_files = [f for f in md_files if not f.name.startswith("分镜提示词")]
+        parts = [mf.read_text(encoding="utf-8") for mf in md_files]
+        full_text = "\n\n---\n\n".join(parts)
+    else:
+        full_text = phase_path.read_text(encoding="utf-8")
+
+    html_body = _md_to_html(full_text)
+    display_name = phase.rstrip("/").replace("\\", "/").split("/")[-1]
+
+    docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+body {{ font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 12pt; line-height: 1.8; color: #222; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+h1 {{ font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; }}
+h2 {{ font-size: 15pt; }}
+h3 {{ font-size: 13pt; }}
+table {{ width: 100%; }}
+p {{ margin: 6pt 0; }}
+hr {{ border: 0; border-top: 1px solid #ccc; margin: 20px 0; }}
+li {{ margin-left: 20px; }}
+</style></head>
+<body>
+{html_body}
+</body></html>"""
+
+    filename = f"{name}_{display_name}.doc"
+    return Response(
+        content=docx_html.encode("utf-8"),
+        media_type="application/msword",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/projects/{name}/export-batch")
+def export_project_batch(name: str, phases: str = ""):
+    """批量导出项目的多个阶段为单个 Word 文件。phases 用逗号分隔阶段名，如 01_故事大纲,03_完整剧本"""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+
+    project_dir = PROJECTS_DIR / name
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    phase_list = [p.strip() for p in phases.split(",") if p.strip()]
+    if not phase_list:
+        raise HTTPException(status_code=400, detail="请指定要导出的阶段")
+
+    all_parts: list[str] = []
+
+    for phase in phase_list:
+        phase_path = project_dir / phase
+        if not phase_path.exists():
+            continue
+
+        if phase_path.is_dir():
+            root_md = list(phase_path.glob("*.md"))
+            sub_md = []
+            for subdir in sorted(phase_path.iterdir()):
+                if subdir.is_dir():
+                    sub_md.extend(subdir.glob("*.md"))
+            md_files = root_md + sub_md
+            md_files = [f for f in md_files if not f.name.startswith("分镜提示词")]
+            parts = [mf.read_text(encoding="utf-8") for mf in md_files]
+            text = "\n\n---\n\n".join(parts)
+        else:
+            text = phase_path.read_text(encoding="utf-8")
+
+        phase_label = phase.replace("_", " ").replace("0", "").replace("1", "1").replace("2", "2").replace("3", "3").replace("4", "4").replace("5", "5").replace("6", "6")
+        # 简化阶段标题
+        import re as _re
+        phase_label = _re.sub(r'^\d+_', '', phase)
+        all_parts.append(f"<h1>{phase_label}</h1>\n{_md_to_html(text)}")
+
+    if not all_parts:
+        raise HTTPException(status_code=404, detail="所选阶段没有内容")
+
+    html_body = "\n<hr style='border:2px solid #333; margin:30px 0;'/>\n".join(all_parts)
+
+    docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+body {{ font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 12pt; line-height: 1.8; color: #222; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+h1 {{ font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; page-break-before: always; }}
+h1:first-child {{ page-break-before: auto; }}
+h2 {{ font-size: 15pt; }}
+h3 {{ font-size: 13pt; }}
+table {{ width: 100%; }}
+p {{ margin: 6pt 0; }}
+hr {{ border: 0; border-top: 1px solid #ccc; margin: 20px 0; }}
+li {{ margin-left: 20px; }}
+</style></head>
+<body>
+{html_body}
+</body></html>"""
+
+    filename = f"{name}_全集.doc"
+    encoded_filename = quote(filename)
+    return Response(
+        content=docx_html.encode("utf-8"),
+        media_type="application/msword",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+def _collect_project_phases(project_dir: Path) -> list[str]:
+    """收集项目下所有存在内容的阶段目录名"""
+    phases = []
+    for d in sorted(project_dir.iterdir()):
+        if d.is_dir() and (d / ".md").exists() if False else any(d.glob("*.md")):
+            phases.append(d.name)
+    if not phases:
+        for d in sorted(project_dir.iterdir()):
+            if d.is_dir():
+                has_md = any(d.glob("*.md"))
+                for sd in sorted(d.iterdir()):
+                    if sd.is_dir() and any(sd.glob("*.md")):
+                        has_md = True
+                        break
+                if has_md:
+                    phases.append(d.name)
+    return phases
+
+
+@router.get("/projects/{name}/phases")
+def list_project_phases(name: str):
+    """返回项目下所有有内容的阶段目录，含阶段标签和每阶段内的文件列表"""
+    project_dir = PROJECTS_DIR / name
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    phase_labels = {
+        "01_故事大纲": "故事大纲",
+        "02_完整剧情": "完整剧情",
+        "03_完整剧本": "完整剧本",
+        "04_角色场景": "角色场景",
+        "05_分镜脚本": "分镜脚本",
+        "06_生图需求": "生图需求",
+        "07_生成素材": "生成素材",
+    }
+
+    phases = []
+    for d in sorted(project_dir.iterdir()):
+        if d.is_dir() and d.name[0].isdigit():
+            md_files = list(d.rglob("*.md"))
+            content_count = len(md_files)
+            if content_count == 0 and not any(True for _ in d.rglob("*.png")):
+                continue
+            phase_files = []
+            for mf in sorted(md_files):
+                if mf.name.startswith("分镜提示词"):
+                    continue
+                rel = mf.relative_to(d).as_posix()
+                parent_dir = mf.parent.relative_to(d).as_posix()
+                if parent_dir and parent_dir != ".":
+                    label = f"{parent_dir} — {mf.stem}"
+                else:
+                    label = mf.stem
+                phase_files.append({"name": rel, "label": label})
+            phases.append({
+                "dir": d.name,
+                "label": phase_labels.get(d.name, d.name),
+                "has_content": content_count > 0,
+                "files": phase_files,
+            })
+
+    return {"phases": phases}
+
+
+@router.get("/projects/{name}/export-single")
+def export_single_file(name: str, phase: str = "", file: str = ""):
+    """导出项目内单个 MD 文件为 Word"""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+
+    project_dir = PROJECTS_DIR / name
+    phase_path = project_dir / phase
+    file_path = phase_path / file if phase else project_dir / file
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    text = file_path.read_text(encoding="utf-8")
+    html_body = _md_to_html(text)
+
+    docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+body {{ font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 12pt; line-height: 1.8; color: #222; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+h1 {{ font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; }}
+h2 {{ font-size: 15pt; }}
+h3 {{ font-size: 13pt; }}
+table {{ width: 100%; }}
+p {{ margin: 6pt 0; }}
+hr {{ border: 0; border-top: 1px solid #ccc; margin: 20px 0; }}
+li {{ margin-left: 20px; }}
+</style></head>
+<body>
+{html_body}
+</body></html>"""
+    stem = file_path.stem
+    fn = f"{name}_{stem}.doc"
+    return Response(
+        content=docx_html.encode("utf-8"),
+        media_type="application/msword",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"},
+    )
+
+
+@router.get("/projects/{name}/export-phase")
+def export_phase_all(name: str, phase: str = ""):
+    """导出某个阶段的所有文件合并为一个 Word，每集之间用分页隔开"""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+
+    project_dir = PROJECTS_DIR / name
+    phase_path = project_dir / phase
+    if not phase_path.exists():
+        raise HTTPException(status_code=404, detail="阶段不存在")
+
+    md_files = list(phase_path.rglob("*.md"))
+    md_files = [f for f in md_files if not f.name.startswith("分镜提示词")]
+    if not md_files:
+        raise HTTPException(status_code=404, detail="该阶段无内容")
+
+    all_html: list[str] = []
+    for mf in sorted(md_files):
+        rel = mf.relative_to(phase_path).as_posix()
+        text = mf.read_text(encoding="utf-8")
+        all_html.append(f"<h2>{rel}</h2>\n{_md_to_html(text)}")
+
+    html_body = "\n<hr style='border:2px solid #333; margin:30px 0; page-break-after: always;'/>\n".join(all_html)
+
+    phase_labels = {
+        "01_故事大纲": "故事大纲", "02_完整剧情": "完整剧情", "03_完整剧本": "完整剧本",
+        "04_角色场景": "角色场景", "05_分镜脚本": "分镜脚本", "06_生图需求": "生图需求",
+    }
+    phase_label = phase_labels.get(phase, phase)
+    docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"/>
+<style>
+body {{ font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 12pt; line-height: 1.8; color: #222; max-width: 210mm; margin: 0 auto; padding: 20px; }}
+h1 {{ font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; page-break-before: always; }}
+h1:first-child {{ page-break-before: auto; }}
+h2 {{ font-size: 15pt; border-bottom: 1px solid #ccc; padding-bottom: 4px; page-break-before: always; }}
+h2:first-child {{ page-break-before: auto; }}
+h3 {{ font-size: 13pt; }}
+table {{ width: 100%; }}
+p {{ margin: 6pt 0; }}
+hr {{ border: 0; border-top: 1px solid #ccc; margin: 20px 0; }}
+li {{ margin-left: 20px; }}
+</style></head>
+<body>
+<h1>{phase_label}</h1>
+{html_body}
+</body></html>"""
+
+    fn = f"{name}_{phase_label}.doc"
+    return Response(
+        content=docx_html.encode("utf-8"),
+        media_type="application/msword",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"},
+    )
+
+
 @router.post("/projects")
 def create_project(req: CreateProjectRequest):
     from core.project_manager import ProjectManager
@@ -562,6 +904,22 @@ def list_video_clips(name: str):
     return {"clips": clips, "final": final_clip}
 
 
+@router.get("/projects/{name}/video/shot-status")
+def get_video_shot_status(name: str):
+    project_dir = PROJECTS_DIR / name
+    video_base = project_dir / "07_生成素材" / "视频"
+    shot_statuses: dict[int, str] = {}
+    shot_urls: dict[int, str] = {}
+    if video_base.exists():
+        for f in sorted(video_base.rglob("镜头*.mp4")):
+            m = re.match(r"镜头(\d+)", f.stem)
+            if m:
+                idx = int(m.group(1))
+                shot_statuses[idx] = "done"
+                shot_urls[idx] = f"/api/projects/{name}/media/{f.relative_to(project_dir).as_posix()}"
+    return {"shotStatuses": shot_statuses, "shotVideoUrls": shot_urls}
+
+
 @router.put("/projects/{name}/config")
 def update_project_config(name: str, body: dict):
     from core.project_manager import ProjectManager
@@ -813,12 +1171,24 @@ def get_character_prompt(name: str, body: dict):
     # 拼装提示词
     prompt = PromptBuilder.generate_character_prompt(char, style_decl, mode="base")
 
-    # 如果是变体，返回 base_character
+    # 如果是变体，返回 base_character 和 cross_ref
     base_character = None
+    cross_ref = None
     if not char.get("is_base", True):
         base_character = char.get("character_base") or char.get("based_on")
+    try:
+        demand_file = project.project_dir / "06_生图需求" / "生图清单.json"
+        if demand_file.exists():
+            demands = json.loads(demand_file.read_text(encoding="utf-8"))
+            for dc in demands.get("characters", []):
+                if dc.get("name") == char_name:
+                    base_character = base_character or dc.get("character_base")
+                    cross_ref = dc.get("_cross_ref")
+                    break
+    except Exception:
+        pass
 
-    return {"prompt": prompt, "style_decl": style_decl, "base_character": base_character}
+    return {"prompt": prompt, "style_decl": style_decl, "base_character": base_character, "cross_ref": cross_ref}
 
 
 @router.get("/projects/{name}/character-confirmed-images/{characterName}")

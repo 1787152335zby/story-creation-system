@@ -414,6 +414,28 @@ def get_available_models():
             "type": "official",
             "backend": llm_backend,
         }
+
+    def _get_model_capability(model_id: str) -> tuple:
+        ml = model_id.lower()
+        supports_img2img = True
+        max_ref = 1
+        if any(k in ml for k in ["gemini", "banana", "gpt-image", "qwen-image", "flux"]):
+            max_ref = 3
+        if any(k in ml for k in ["dall-e", "midjourney", "mj_"]):
+            max_ref = 2
+        if "seedream" in ml:
+            max_ref = 1
+        return max_ref, supports_img2img
+
+    for group_type in ("llm_groups", "image_groups", "video_groups"):
+        if group_type != "image_groups":
+            continue
+        for group in result.get(group_type, []):
+            for m in group.get("models", []):
+                max_ref, img2img = _get_model_capability(m["value"])
+                m["max_ref_images"] = max_ref
+                m["supports_img2img"] = img2img
+
     return result
 
 

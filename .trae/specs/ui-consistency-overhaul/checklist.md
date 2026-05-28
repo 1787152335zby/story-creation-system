@@ -1,0 +1,17 @@
+- [x] ConfirmModal 组件已创建，位于 src/components/ConfirmModal.tsx
+- [x] ConfirmModal 支持 icon/title/description/confirmText/cancelText/onConfirm/onCancel props
+- [x] ConfirmModal backdrop 统一使用 `bg-black/50 backdrop-blur-sm`
+- [x] HomePage 中的删除项目弹窗已替换为 ConfirmModal
+- [x] HomePage 中的删除模板弹窗已替换为 ConfirmModal
+- [x] ProjectImageGenForm 中的删除确认弹窗已替换为 ConfirmModal
+- [x] HistoryPage 中的删除确认弹窗已替换为 ConfirmModal
+- [x] SceneBackground 粒子颜色从 `--primary` CSS 变量读取
+- [x] SceneBackground 背景渐变跟随主题变化
+- [x] 角色面板和场景面板使用折叠结构（默认收起）
+- [x] CollapsibleSection 展开/收拢状态正常工作
+- [x] 所有 `text-[8px]` 和 `text-[9px]` 已替换为 `text-[10px]`
+- [x] 首页工具卡片图标色使用 `hsl(var(--primary) / x)` CSS 变量引用
+- [x] 首页 Header 图标色使用 CSS 变量引用
+- [x] 视频页生成按钮色使用 CSS 变量引用
+- [x] 所有删除确认弹窗 backdrop 统一
+- [x] frontend `npm run build` 通过

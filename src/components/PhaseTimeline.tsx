@@ -50,7 +50,10 @@ export default function PhaseTimeline({
   const donePhaseCount = (projectConfig?.phases || []).filter((p: any) => p.done).length
 
   return (
-    <aside className="w-64 border-r flex flex-col relative z-10" style={{ borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+    <aside className="w-64 border-r flex flex-col relative z-10 premium-subpanel premium-panel-rich" style={{ borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+      {/* Decorative layers matching homepage cards */}
+      <div className="wp-border" style={{ borderRadius: 0 }} />
+      <div className="wp-bottom-glow" />
       <div className="p-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
         <button onClick={() => onNavigate('/home')} className="flex items-center gap-1.5 text-sm mb-3 transition-colors" style={{ color: 'rgba(255,255,255,0.60)' }}>
           <ArrowLeft className="w-4 h-4" /> 返回首页
@@ -101,13 +104,14 @@ export default function PhaseTimeline({
                 disabled={!canView}
                 className={`group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-200`}
                 style={{
-                  background: isSelected ? 'rgba(255,255,255,0.15)' : s === 'active' ? 'rgba(255,255,255,0.08)' : s === 'done' ? 'transparent' : 'transparent',
+                  background: isSelected ? 'rgba(167,139,250,0.10)' : s === 'active' ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  borderLeft: s === 'done' ? '2px solid rgba(74,222,128,0.4)' : s === 'active' ? '2px solid rgba(167,139,250,0.6)' : '2px solid transparent',
                   color: isSelected ? 'rgba(255,255,255,0.95)' : s === 'active' ? 'rgba(255,255,255,0.85)' : s === 'done' ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.40)',
                   fontWeight: isSelected || s === 'active' ? 500 : 400,
                   cursor: canView ? 'pointer' : 'default'
                 }}
                 onMouseOver={(e) => {
-                  if (s === 'done') {
+                  if (s === 'done' && !isSelected) {
                     e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
                   }
                 }}

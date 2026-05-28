@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Sparkles, Loader2, Download, Trash2 } from 'lucide-react'
-import { fetchProjects, fetchCharacters, fetchScenes, fetchProps, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, fetchGenerationHistoryItem, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion, uploadReferenceImage, generateSelectionPrompt, fetchConfirmedImages, fetchImagePresets, fetchCharacterPrompt, fetchCharacterConfirmedImages, fetchScenePrompt, fetchSceneConfirmedImages, fetchPropPrompt } from '../lib/api'
+import { fetchProjects, fetchCharacters, fetchScenes, fetchProps, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, fetchGenerationHistoryItem, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion, uploadReferenceImage, generateSelectionPrompt, fetchConfirmedImages, fetchImagePresets, fetchCharacterPrompt, fetchCharacterConfirmedImages, fetchScenePrompt, fetchSceneConfirmedImages, fetchPropPrompt, getModelCapability } from '../lib/api'
 import FreeImageGenForm from '../components/FreeImageGenForm'
 import ProjectImageGenForm from '../components/ProjectImageGenForm'
 import ImagePreview from '../components/ImagePreview'
 
 import { useToast } from '../components/Toast'
 import Starfield from '../components/Starfield'
-import type { ProjectInfo, EntityImagesMap, GenerationHistory, HistoryEntry, CharacterInfo, SceneInfo, PropInfo, EntityImage, ReferenceUrlsByType } from '../lib/types'
+import type { ProjectInfo, EntityImagesMap, GenerationHistory, HistoryEntry, CharacterInfo, SceneInfo, PropInfo, EntityImage, ReferenceUrlsByType, FreeRefImage } from '../lib/types'
 
 export default function ImageGenPage() {
   const navigate = useNavigate()
@@ -77,7 +77,11 @@ export default function ImageGenPage() {
   const [manualRefUrlsByType, setManualRefUrlsByType] = useState<ReferenceUrlsByType>({ style: [], character: [], scene: [], prop: [] })
   const [selectedProp, setSelectedProp] = useState<string | null>(null)
   const [promptLocked, setPromptLocked] = useState(false)
+  const [freeCap, setFreeCap] = useState({ max_ref_images: 1, supports_img2img: true })
+  const [projectCap, setProjectCap] = useState({ max_ref_images: 1, supports_img2img: true })
   const [refTypeEnabled, setRefTypeEnabled] = useState<Record<string, boolean>>({ style: true, character: true, scene: true, prop: true })
+  const [baseRefImages, setBaseRefImages] = useState<FreeRefImage[]>([])
+  const [refMetaByType, setRefMetaByType] = useState<Record<string, Record<string, { label: string }>>>({})
 
   useEffect(() => {
     fetchProjects().then(setProjects)
@@ -87,6 +91,8 @@ export default function ImageGenPage() {
       const model = cfg?.model || ''
       setFreeModel(model)
       setProjectModel(model)
+      setFreeCap(getModelCapability(model))
+      setProjectCap(getModelCapability(model))
       fetchImageResolutions(model || undefined).then(r => {
         setFreeResolutions(r.resolutions)
         setFreeRatioGroups(r.groups || {})
@@ -195,24 +201,52 @@ export default function ImageGenPage() {
       const isVariant = name.includes('_')
       if (isVariant && result.base_character) {
         const baseImages = await fetchCharacterConfirmedImages(selectedProject, result.base_character)
+        let charRefs: string[] = []
         if (baseImages.images.length > 0) {
-          setAutoRefUrls(baseImages.images.map(img => img.url))
-          setAutoRefUrlsByType(prev => ({ ...prev, character: baseImages.images.map(img => img.url) }))
+          charRefs = baseImages.images.map(img => img.url)
         }
+        if (result.cross_ref) {
+          try {
+            const crImages = await fetchCharacterConfirmedImages(selectedProject, result.cross_ref)
+            if (crImages.images.length > 0) {
+              charRefs = [...charRefs, ...crImages.images.map(img => img.url)]
+            }
+          } catch {}
+        }
+        setAutoRefUrls(charRefs)
+         setManualRefUrlsByType(prev => {
+           const existing = new Set(prev.character || [])
+           const merged = [...prev.character, ...charRefs.filter(u => !existing.has(u))]
+           return { ...prev, character: merged }
+         })
+         setRefMetaByType(prev => {
+           const meta = { ...(prev.character || {}) }
+           const label = result.base_character || name.split('_')[0]
+           for (const u of charRefs) { if (!meta[u]) meta[u] = { label } }
+           return { ...prev, character: meta }
+         })
       } else {
         const selfImages = await fetchCharacterConfirmedImages(selectedProject, name)
         if (selfImages.images.length > 0) {
-          setAutoRefUrls(selfImages.images.map(img => img.url))
-          setAutoRefUrlsByType(prev => ({ ...prev, character: selfImages.images.map(img => img.url) }))
+          const urls = selfImages.images.map(img => img.url)
+          setAutoRefUrls(urls)
+          setManualRefUrlsByType(prev => {
+             const existing = new Set(prev.character || [])
+             const merged = [...prev.character, ...urls.filter(u => !existing.has(u))]
+             return { ...prev, character: merged }
+           })
+           setRefMetaByType(prev => {
+             const meta = { ...(prev.character || {}) }
+             for (const u of urls) { if (!meta[u]) meta[u] = { label: name } }
+             return { ...prev, character: meta }
+           })
         } else {
           setAutoRefUrls([])
-          setAutoRefUrlsByType(prev => ({ ...prev, character: [] }))
         }
       }
     } catch {
       setProjectPrompt('')
       setAutoRefUrls([])
-      setAutoRefUrlsByType(prev => ({ ...prev, character: [] }))
     }
     setUseCharTemplate(false)
   }
@@ -284,13 +318,43 @@ export default function ImageGenPage() {
       const finalParams: Record<string, unknown> = {}
       if (selectedPreset) {
         if (selectedPreset.prompt_suffix) {
-          finalPrompt = `${freePrompt}，${selectedPreset.prompt_suffix}`
+          const styleKeywords = ['cg', '3d', '写实', '动画', '水墨', '像素', '卡通', '二次元', '油画', '素描', '手绘', '赛博', '国风', '复古', '极简']
+          const promptLower = freePrompt.toLowerCase()
+          const userStyle = styleKeywords.find(k => promptLower.includes(k))
+          const suffixStyle = styleKeywords.find(k => selectedPreset.prompt_suffix.includes(k))
+          if (userStyle && suffixStyle && userStyle !== suffixStyle) {
+            toast(`提示词已指定「${userStyle}」风格，预设「${suffixStyle}」未自动追加 | 如需启用请手动调整`, 'warning')
+          } else {
+            finalPrompt = `${freePrompt}，${selectedPreset.prompt_suffix}`
+          }
         }
         if (selectedPreset.style_params) {
           Object.assign(finalParams, selectedPreset.style_params)
         }
       }
-      const result = await freeImageGen(finalPrompt, freeNegative, freeSize, freeCount, freeModel, freeRefUrls, freeRefUrlsByType, finalParams)
+      // 把底图转成 base64 data URI 放入 reference_urls
+      const allRefUrls = [...freeRefUrls]
+      if (baseRefImages.length > 0) {
+        const base64Images = await Promise.all(baseRefImages.map(async (img) => {
+          if (img.file) {
+            return new Promise<string>((resolve) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result as string)
+              reader.readAsDataURL(img.file!)
+            })
+          }
+          // 从 blob URL 获取
+          const resp = await fetch(img.url)
+          const blob = await resp.blob()
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.readAsDataURL(blob)
+          })
+        }))
+        allRefUrls.unshift(...base64Images)
+      }
+      const result = await freeImageGen(finalPrompt, freeNegative, freeSize, freeCount, freeModel, allRefUrls, freeRefUrlsByType, finalParams)
       if (result.task_id) setCurrentTaskId(result.task_id)
       setFreeResults(prev => [...result.images, ...prev])
       fetchGenerationHistory().then(h => setHistoryFree(h.images_free))
@@ -320,13 +384,16 @@ export default function ImageGenPage() {
     setMode('free')
     if (entry.prompt) setFreePrompt(entry.prompt)
     if (entry.negative_prompt) setFreeNegative(entry.negative_prompt)
-    if (entry.model) setFreeModel(entry.model)
+    if (entry.model) { setFreeModel(entry.model); setFreeCap(getModelCapability(entry.model)) }
     if (entry.size) { setFreeSize(entry.size); }
     if (entry.count) setFreeCount(Number(entry.count))
     if (entry.reference_urls && entry.reference_urls.length > 0) {
       setFreeRefUrls(entry.reference_urls)
     }
-    toast('已加载历史参数', 'success')
+    if (entry.reference_urls_by_type) {
+      setFreeRefUrlsByType(entry.reference_urls_by_type)
+    }
+    toast('已加载历史参数（提示词 + 参考图）', 'success')
   }
 
   return (
@@ -345,16 +412,34 @@ export default function ImageGenPage() {
           }}>
           🖼️ 智能生图
         </h1>
-        <p className="text-xs text-white/15 tracking-wider mb-6">自由创作 · 角色定妆照 · 场景概念图</p>
+        <p className="text-xs text-white/15 tracking-wider mb-4">自由创作 · 角色定妆照 · 场景概念图</p>
 
-        <div className="flex gap-2 mb-6">
-          <button onClick={() => setMode('free')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
-            style={mode === 'free' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            ✏️ 自由创作
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <button onClick={() => setMode('free')}
+            className={`p-4 rounded-xl text-left transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${mode === 'free' ? 'selected' : ''}`}
+            style={{
+              background: mode === 'free' ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${mode === 'free' ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.06)'}`,
+              boxShadow: mode === 'free' ? '0 0 20px rgba(167,139,250,0.08)' : 'none',
+            }}>
+            <div className="relative z-[1]">
+              <div className="text-2xl mb-2">✏️</div>
+              <div className="font-semibold text-sm mb-0.5" style={{ color: mode === 'free' ? 'rgba(220,210,255,0.95)' : 'rgba(255,255,255,0.55)' }}>自由创作</div>
+              <div className="text-[10px]" style={{ color: mode === 'free' ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.2)' }}>输入提示词，AI 自由生成图片</div>
+            </div>
           </button>
-          <button onClick={() => setMode('project')} className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all glow-border"
-            style={mode === 'project' ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1px solid rgba(255,255,255,0.12)' } : { background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            📂 项目模式
+          <button onClick={() => setMode('project')}
+            className={`p-4 rounded-xl text-left transition-all duration-200 glow-border shimmer-hover relative overflow-hidden ${mode === 'project' ? 'selected' : ''}`}
+            style={{
+              background: mode === 'project' ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${mode === 'project' ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.06)'}`,
+              boxShadow: mode === 'project' ? '0 0 20px rgba(167,139,250,0.08)' : 'none',
+            }}>
+            <div className="relative z-[1]">
+              <div className="text-2xl mb-2">📂</div>
+              <div className="font-semibold text-sm mb-0.5" style={{ color: mode === 'project' ? 'rgba(220,210,255,0.95)' : 'rgba(255,255,255,0.55)' }}>项目模式</div>
+              <div className="text-[10px]" style={{ color: mode === 'project' ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.2)' }}>为项目中的角色/场景/道具生图</div>
+            </div>
           </button>
         </div>
 
@@ -374,6 +459,7 @@ export default function ImageGenPage() {
             referenceUrls={freeRefUrls}
             referenceUrlsByType={freeRefUrlsByType}
             onReferenceUrlsByTypeChange={setFreeRefUrlsByType}
+            onFreeRefImagesChange={setBaseRefImages}
             presets={presets}
             selectedPreset={selectedPreset}
             currentTaskId={currentTaskId}
@@ -384,11 +470,12 @@ export default function ImageGenPage() {
             onSizeChange={setFreeSize}
             onCountChange={setFreeCount}
             onRatioChange={setFreeSelectedRatio}
-            onModelChange={setFreeModel}
+            onModelChange={(model) => { setFreeModel(model); setFreeCap(getModelCapability(model)) }}
             onPresetSelect={setSelectedPreset}
             onGenerate={handleFreeGen}
             onClearResults={() => setFreeResults([])}
             onPreview={setPreviewSrc}
+            modelCap={freeCap}
           />
 
         ) : (
@@ -420,6 +507,7 @@ export default function ImageGenPage() {
             onManualRefUrlsChange={setManualRefUrls}
             autoRefUrlsByType={autoRefUrlsByType}
             manualRefUrlsByType={manualRefUrlsByType}
+            refMetaByType={refMetaByType}
             onManualRefUrlsByTypeChange={setManualRefUrlsByType}
             projectPrompt={projectPrompt}
             projectNegative={projectNegative}
@@ -451,7 +539,7 @@ export default function ImageGenPage() {
             selectedProp={selectedProp}
             onPropSelect={handlePropSelect}
             onDemandPropSelect={handleDemandPropSelect}
-            onModelChange={setProjectModel}
+            onModelChange={(model) => { setProjectModel(model); setProjectCap(getModelCapability(model)) }}
             onPromptChange={setProjectPrompt}
             onNegativeChange={setProjectNegative}
             onSizeChange={setProjectSize}
@@ -488,12 +576,13 @@ export default function ImageGenPage() {
             setProjectError={setProjectError}
             setProjectGenerating={setProjectGenerating}
             setGeneratedImages={setGeneratedImages}
+            modelCap={projectCap}
           />
           </>
         )}
 
         {mode === 'free' && historyFree.length > 0 && (
-          <div className="rounded-2xl p-5 mt-6 card-glow glass-card">
+          <div className="rounded-2xl p-5 mt-6 card-glow premium-panel premium-glow-bottom">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm">✏️ 自由创作历史</h3>
               {historyFree.length > 9 && (
@@ -504,7 +593,7 @@ export default function ImageGenPage() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {(showAllFree ? historyFree : historyFree.slice(0, 9)).map((img, i) => (
-                <div key={img.url} className="rounded-xl overflow-hidden group relative cursor-pointer" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div key={img.url} className="premium-grid-item group">
                   <img src={img.url} alt="" className="w-full h-36 object-contain bg-white img-hover"
                     onClick={() => setPreviewSrc(img.url)} />
                   <div className="px-2.5 py-2 space-y-1">
@@ -559,7 +648,7 @@ export default function ImageGenPage() {
         )}
         {confirmDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
-            <div className="bg-[#01010a] border border-white/[0.10] rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl card-glow" onClick={e => e.stopPropagation()}>
+            <div className="bg-[#01010a] border border-white/[0.10] rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl card-glow premium-panel" onClick={e => e.stopPropagation()}>
               <p className="text-sm mb-6 text-center">{confirmDelete.message}</p>
               <div className="flex gap-3">
                 <button onClick={() => setConfirmDelete(null)}

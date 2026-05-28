@@ -48,8 +48,9 @@ class ImagePreparator(AgentBase):
             for shot in shots:
                 shot_counter += 1
                 shot_field_map[shot_counter] = f"{ep_name}第{shot.get('field_number', 1)}场"
-                for char_name in shot.get("characters", []):
-                    if char_name in ('无', '无人', '无角色', '空', '-', '—'):
+                for char_name_raw in shot.get("characters", []):
+                    char_name = self._clean_shot_char_name(char_name_raw)
+                    if not char_name:
                         continue
                     if char_name not in all_char_states:
                         known = set(all_char_states.keys())
@@ -135,9 +136,9 @@ class ImagePreparator(AgentBase):
                 })
                 scene_name_set.add(sb)
         all_props = self._categorize_props(visual_bible)
-        key_props = all_props.get("key_props", [])
+        cross_scene_props = all_props.get("cross_scene_props", [])
+        scene_props = all_props.get("scene_props", [])
         char_props = all_props.get("char_props", {})
-        scene_props = all_props.get("scene_props", {})
 
         for c in characters:
             c["prompt"] = PromptBuilder.generate_character_prompt(c, mode="base")
@@ -145,8 +146,23 @@ class ImagePreparator(AgentBase):
         for s in scenes:
             s["prompt"] = PromptBuilder.generate_scene_prompt(s, angle="")
 
-        for p in key_props:
+        for p in cross_scene_props + scene_props:
             p["prompt"] = PromptBuilder.generate_prop_prompt(p)
+
+        all_char_names = {c.get("name", "") for c in characters}
+        seen_canonicals = set()
+        deduped_chars = []
+        for c in characters:
+            if not c.get("is_base"):
+                base = c.get("character_base", c["name"])
+                canonical = self._canonicalize_variant(c, base, all_char_names)
+                key = f"{base}__{canonical}"
+                if key in seen_canonicals:
+                    continue
+                seen_canonicals.add(key)
+                c["variant_name"] = canonical
+            deduped_chars.append(c)
+        characters = self._dedupe_variants_by_similarity(deduped_chars, all_char_names)
 
         character_groups = []
         group_map = {}
@@ -192,8 +208,8 @@ class ImagePreparator(AgentBase):
             "scenes": scenes,
             "scene_groups": scene_groups,
             "char_props": char_props,
+            "cross_scene_props": cross_scene_props,
             "scene_props": scene_props,
-            "key_props": key_props,
             "total_shots": shot_counter,
             "episodes": all_episodes,
         }
@@ -202,6 +218,30 @@ class ImagePreparator(AgentBase):
         (output_dir / "生图清单.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return result
+
+    def generate_assets(self, project: ProjectManager, style: StyleConfig = None,
+                        on_progress: callable = None) -> list[dict]:
+        """调用生图管线，将角色/场景/道具提示词转为实际图片"""
+        from core.image_pipeline import ImagePipeline
+        pipeline = ImagePipeline(project.project_dir)
+
+        result = self.prepare(project, style)
+        characters = result.get("characters", [])
+        scenes = result.get("scenes", [])
+        cross_scene_props = result.get("cross_scene_props", [])
+        scene_props = result.get("scene_props", [])
+
+        assets = []
+        for c in characters:
+            if c.get("is_base", True):
+                assets.append({"type": "角色", "name": c["name"], "data": c})
+        for s in scenes:
+            if s.get("is_base", True):
+                assets.append({"type": "场景", "name": s["name"], "data": s})
+        for p in cross_scene_props + scene_props:
+            assets.append({"type": "道具", "name": p["name"], "data": p})
+
+        return list(pipeline.generate_batch(assets))
 
     PSEUDO_MARKERS = frozenset({
         '地上', '画中', '画面中', '画面内', '画外', '画外音',
@@ -321,6 +361,141 @@ class ImagePreparator(AgentBase):
                 })
         return shots
 
+    def _clean_shot_char_name(self, raw_name: str) -> str:
+        if not raw_name or not raw_name.strip():
+            return ""
+        name = raw_name.strip()
+        if name in ('无', '无人', '无角色', '空', '-', '—'):
+            return ""
+        name = re.sub(r'[→→].*$', '', name).strip()
+        name = re.sub(r'[（(][^)）]*[)）]', '', name).strip()
+        if not name:
+            return ""
+        NON_CHAR_PREFIXES = (
+            '无（', '屏幕', '画面', '声音', '声源', '文字', '字幕',
+            '回执', '水渍', '残骸', '碎片', '火光', '烟雾', '照片',
+            '镜头', '推近', '拉远', '淡入', '淡出',
+        )
+        for prefix in NON_CHAR_PREFIXES:
+            if name.startswith(prefix):
+                return ""
+        if re.search(r'^第\d+场', name):
+            return ""
+        return name
+
+    def _is_usable_character(self, c: dict) -> bool:
+        name = c.get("name", "")
+        GARBAGE_PREFIXES = (
+            '无（', '无(', '屏幕', '画面', '声音', '声源', '文字', '字幕',
+            '回执', '水渍', '残骸', '碎片', '火光', '烟雾', '照片',
+            '镜头', '系统', '推近', '拉远', '淡入', '淡出', '图片',
+        )
+        for prefix in GARBAGE_PREFIXES:
+            if name.startswith(prefix):
+                return False
+        if re.search(r'^第\d+场', name):
+            return False
+        has_data = (
+            c.get("appearance") or c.get("clothing") or
+            c.get("key_features") or c.get("accessories")
+        )
+        if not has_data and not c.get("prompt"):
+            return False
+        return True
+
+    def _is_usable_scene(self, s: dict) -> bool:
+        name = s.get("name", "")
+        if not name.strip():
+            return False
+        GARBAGE_SCENE_PREFIXES = (
+            '无（', '无(', '记忆-林川回忆', '画面',
+            '声音', '声源', '文字', '字幕', '回执',
+        )
+        for prefix in GARBAGE_SCENE_PREFIXES:
+            if name.startswith(prefix):
+                return False
+        if name.startswith('记忆-') and not s.get("environment"):
+            return False
+        return True
+
+    def _canonicalize_variant(self, c: dict, base: str, all_char_names: set) -> str:
+        """将语义相同的变体名归一化，检测跨角色引用。
+
+        策略（通用，不依赖具体故事内容）：
+        1. 剥离常见后缀（形态/投影/拟态/形象 等）→ 非角色名才生效
+        2. 同 base 下剥离后相同的 → 合并为一个变体
+        3. 变体名或描述包含其他已知角色名 → 标记 _cross_ref
+        4. 同 base 下共享同一 cross_ref → 同一概念，合并
+        5. 同 base 下仍不同但有字符重叠 → Jaccard ≥ 0.35 合并
+        """
+        vn = c.get("variant_name", "") or c.get("variant_tag", "") or ""
+        fd = c.get("feature_desc", "") or c.get("appearance_change", "") or ""
+
+        SUFFIXES = ("形态", "形象", "状态", "模式", "变体", "版本", "样式", "效果", "投影", "拟态", "变形", "幻化")
+        stripped = vn
+        for sfx in SUFFIXES:
+            if stripped.endswith(sfx) and len(stripped) > len(sfx):
+                candidate = stripped[:-len(sfx)]
+                if candidate and candidate not in all_char_names:
+                    stripped = candidate
+                    break
+        if not stripped or stripped in all_char_names:
+            stripped = vn
+
+        c["_stripped"] = stripped
+
+        for char_name in sorted(all_char_names, key=len, reverse=True):
+            if len(char_name) < 2 or char_name == base:
+                continue
+            if char_name in vn or char_name in fd:
+                c["_cross_ref"] = char_name
+                break
+
+        return stripped
+
+    def _dedupe_variants_by_similarity(self, chars: list, all_char_names: set) -> list:
+        def _is_char_name(s: str) -> bool:
+            return s in all_char_names and len(s) >= 2
+
+        by_base = {}
+        for i, c in enumerate(chars):
+            base = c.get("character_base", c["name"])
+            by_base.setdefault(base, []).append(i)
+
+        merged_out = set()
+        for base, indices in by_base.items():
+            if len(indices) <= 1:
+                continue
+            for a_idx in range(len(indices)):
+                for b_idx in range(a_idx + 1, len(indices)):
+                    ai, bi = indices[a_idx], indices[b_idx]
+                    sa = chars[ai].get("_stripped", "")
+                    sb = chars[bi].get("_stripped", "")
+                    if not sa or not sb or sa == sb:
+                        continue
+                    if not _is_char_name(sa) and not _is_char_name(sb):
+                        if sa in sb or sb in sa:
+                            merged_out.add(bi)
+                            continue
+                    cra = chars[ai].get("_cross_ref")
+                    crb = chars[bi].get("_cross_ref")
+                    if cra and crb and cra == crb:
+                        merged_out.add(bi)
+                        continue
+                    if cra or crb:
+                        continue
+                    cs_a = set(sa)
+                    cs_b = set(sb)
+                    if not cs_a or not cs_b:
+                        continue
+                    intersection = cs_a & cs_b
+                    union = cs_a | cs_b
+                    jaccard = len(intersection) / len(union)
+                    if jaccard >= 0.35:
+                        merged_out.add(bi)
+
+        return [c for i, c in enumerate(chars) if i not in merged_out]
+
     def _merge_with_bible(self, demand_chars: list, bible: dict) -> list:
         bible_chars = {c["name"]: c for c in bible.get("characters", [])}
         for dc in demand_chars:
@@ -332,7 +507,7 @@ class ImagePreparator(AgentBase):
             dc["variant_name"] = bc.get("variant_name", "")
             dc["is_base"] = bc.get("is_base", True)
             dc["character_base"] = bc.get("character_base", dc.get("character_base", dc["name"]))
-        return demand_chars
+        return [c for c in demand_chars if self._is_usable_character(c)]
 
     def _merge_scenes_with_bible(self, demand_scenes: list, bible: dict) -> list:
         bible_scenes = {s["name"]: s for s in bible.get("scenes", [])}
@@ -345,49 +520,57 @@ class ImagePreparator(AgentBase):
             ds["scene_base"] = bs.get("scene_base", ds["name"])
             ds["is_base"] = bs.get("is_base", True)
             ds["variant_name"] = bs.get("variant_name", "")
-        return demand_scenes
+        return [s for s in demand_scenes if self._is_usable_scene(s)]
 
     def _categorize_props(self, bible: dict) -> dict:
         all_props = bible.get("props", [])
         bible_scenes = bible.get("scenes", [])
 
-        key_props = []
-        char_props = {}
-        scene_props = {}
-
-        scene_prop_names = {}
+        scene_name_variants = {}
         for s in bible_scenes:
             sn = s.get("name", "")
-            spn = s.get("scene_base", "")
-            for psn in (sn, spn):
-                if not psn:
-                    continue
-                for pname in s.get("props", []) or []:
-                    scene_prop_names[pname] = psn
+            base = s.get("scene_base", "")
+            for v in (sn, base):
+                if v and len(v) >= 2:
+                    scene_name_variants.setdefault(v, set()).add(sn)
+
+        cross_scene_props = []
+        scene_props = []
+        char_props = {}
 
         for p in all_props:
             name = p.get("name", "")
             owner = (p.get("owner") or "").strip()
             appearance = p.get("appearance", "") or p.get("description", "")
-            pc = p.get("prop_class", "")
+            category = p.get("category", "")
+            prop_scene = p.get("scene", "") or ""
+
+            matched_scenes = set()
+            for variant, canonicals in scene_name_variants.items():
+                if variant in prop_scene or (prop_scene and prop_scene in variant):
+                    matched_scenes.update(canonicals)
+            scenes = sorted(matched_scenes)
+            scene_count = len(scenes)
+
             entry = {
                 "name": name,
                 "appearance": appearance,
-                "prop_class": pc,
+                "category": category,
+                "scenes": scenes,
+                "scene_count": scene_count,
                 "prompt": PromptBuilder.generate_prop_prompt(p),
             }
-            if owner:
+            if any(kw in category for kw in ("跨场景", "关键")):
+                cross_scene_props.append(entry)
+            elif "随身" in category and owner:
                 char_props.setdefault(owner, []).append(entry)
-            if pc == "关键道具":
-                matched_scene = scene_prop_names.get(name)
-                if matched_scene:
-                    scene_props.setdefault(matched_scene, []).append(entry)
-                else:
-                    key_props.append(entry)
-            if not owner and pc != "关键道具":
-                scene_props.setdefault("_other", []).append(entry)
+            else:
+                scene_props.append(entry)
 
-        return {"key_props": key_props, "char_props": char_props, "scene_props": scene_props}
+        cross_scene_props.sort(key=lambda x: x["name"])
+        scene_props.sort(key=lambda x: x["name"])
+
+        return {"cross_scene_props": cross_scene_props, "scene_props": scene_props, "char_props": char_props}
 
     def _fallback_full(self, project: ProjectManager) -> dict:
         try:
@@ -411,7 +594,7 @@ class ImagePreparator(AgentBase):
         } for s in scenes]
         key_props = [{
             "name": p["name"], "appearance": p.get("appearance", "") or p.get("description", ""),
-            "prop_class": p.get("prop_class", ""),
+            "category": p.get("category", ""),
             "prompt": PromptBuilder.generate_prop_prompt(p),
         } for p in props]
 
@@ -427,7 +610,9 @@ class ImagePreparator(AgentBase):
     def _build_report(self, result: dict) -> str:
         chars = result.get("characters", [])
         scenes = result.get("scenes", [])
-        key_props = result.get("key_props", [])
+        cross_scene_props = result.get("cross_scene_props", [])
+        scene_props = result.get("scene_props", [])
+        total_props = len(cross_scene_props) + len(scene_props)
         total_shots = result.get("total_shots", 0)
         is_fallback = result.get("fallback", False)
 
@@ -438,8 +623,8 @@ class ImagePreparator(AgentBase):
         report += f"- 扫描镜头数：{total_shots}\n"
         report += f"- 去重后角色出场状态：{len(chars)} 个\n"
         report += f"- 去重后场景：{len(scenes)} 个\n"
-        if key_props:
-            report += f"- 关键线索道具：{len(key_props)} 个\n"
+        if total_props:
+            report += f"- 道具：{total_props} 个（跨场景 {len(cross_scene_props)} + 场景 {len(scene_props)}）\n"
         report += f"\n## 角色出场清单\n"
         for c in chars[:30]:
             eps = '、'.join(c.get('episodes', []))
@@ -459,8 +644,12 @@ class ImagePreparator(AgentBase):
         for s in scenes:
             shots = s.get('shot_indices', [])
             report += f"- {s['name']} → 镜头 {len(shots)} 次\n"
-        if key_props:
-            report += f"\n## 关键线索道具\n"
-            for p in key_props:
-                report += f"- {p['name']}\n"
+        if cross_scene_props:
+            report += f"\n## 跨场景道具\n"
+            for p in cross_scene_props:
+                report += f"- {p['name']}（{p.get('category', '')}）\n"
+        if scene_props:
+            report += f"\n## 场景道具\n"
+            for p in scene_props:
+                report += f"- {p['name']}（出现在 {p.get('scene_count', 0)} 个场景）\n"
         return report

@@ -89,6 +89,7 @@ export interface HistoryEntry {
   size?: string
   count?: number
   reference_urls?: string[]
+  reference_urls_by_type?: ReferenceUrlsByType
   timestamp?: string
   project_name?: string
   character_names?: string[]
@@ -191,4 +192,16 @@ export interface AssetLibrary {
   characters: Record<string, AssetLibraryEntity>
   scenes: Record<string, AssetLibraryEntity>
   props: Record<string, AssetLibraryEntity>
+}
+
+export interface ModelCapability {
+  max_ref_images: number
+  supports_img2img: boolean
+}
+
+export interface FreeRefImage {
+  id: string
+  url: string
+  label: string
+  file?: File
 }

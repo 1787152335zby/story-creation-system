@@ -1,9 +1,22 @@
 import { useState, useEffect, useRef } from 'react'
-import { Sparkles, Loader2, Upload, X, Download, Play, CheckSquare, Square, RefreshCw, ChevronDown, ChevronRight, Film, Music, Type, Scissors } from 'lucide-react'
+import { Sparkles, Loader2, Upload, X, Download, Play, CheckSquare, Square, RefreshCw, ChevronDown, ChevronRight, Film, Music, Type, Scissors, Tag } from 'lucide-react'
 import ModelSelector from './ModelSelector'
 import ImagePreview from './ImagePreview'
-import { fetchVideoResolutions, freeVideoGen, fetchProjectVisualAssets, fetchCharacters, fetchScenes, fetchProps, fetchPhaseContent, fetchConfirmedImages, fetchProjectAssetLibrary, fetchSettings } from '../lib/api'
-import type { AssetLibrary, PropInfo } from '../lib/types'
+import { fetchVideoResolutions, freeVideoGen, fetchProjectVisualAssets, fetchCharacters, fetchScenes, fetchPhaseContent, fetchConfirmedImages, fetchProjectAssetLibrary, fetchSettings, fetchVideoShotStatus, fetchImageDemands, fetchGenerationHistory } from '../lib/api'
+import type { AssetLibrary } from '../lib/types'
+
+interface RefFile {
+  file: File
+  preview: string
+  label: string
+  type: 'character' | 'scene' | 'image' | 'audio'
+}
+
+interface HistoryVideo {
+  url: string
+  label: string
+  time: number
+}
 
 interface ExtractedShot {
   index: number
@@ -36,6 +49,7 @@ export default function VideoProjectPanel({ projectName }: Props) {
   const promptRef = useRef<HTMLTextAreaElement>(null)
 
   // Project data
+  const [imageDemands, setImageDemands] = useState<any>(null)
   const [characters, setCharacters] = useState<any[]>([])
   const [scenes, setScenes] = useState<any[]>([])
   const [shots, setShots] = useState<ExtractedShot[]>([])
@@ -49,8 +63,9 @@ export default function VideoProjectPanel({ projectName }: Props) {
   const [selectedCharNames, setSelectedCharNames] = useState<string[]>([])
   const [selectedSceneNames, setSelectedSceneNames] = useState<string[]>([])
   const [selectedShotIndices, setSelectedShotIndices] = useState<number[]>([])
-  const [propsList, setPropsList] = useState<PropInfo[]>([])
   const [selectedProp, setSelectedProp] = useState<string | null>(null)
+  const [expandedCharGroups, setExpandedCharGroups] = useState<Record<string, boolean>>({})
+  const [expandedSceneTemp, setExpandedSceneTemp] = useState<Record<string, boolean>>({})
 
   // Generate mode
   const [genMode, setGenMode] = useState<'single' | 'batch'>('single')
@@ -61,7 +76,9 @@ export default function VideoProjectPanel({ projectName }: Props) {
   const [prompt, setPrompt] = useState('')
 
   // Reference images
-  const [refFiles, setRefFiles] = useState<{ file: File; preview: string }[]>([])
+  const [refFiles, setRefFiles] = useState<RefFile[]>([])
+  const [editingLabel, setEditingLabel] = useState<number | null>(null)
+  const [historyVideos, setHistoryVideos] = useState<HistoryVideo[]>([])
   const [projectImages, setProjectImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
   const [confirmedImages, setConfirmedImages] = useState<{ characters: Record<string, { name: string; url: string }[]>; scenes: Record<string, { name: string; url: string }[]> }>({ characters: {}, scenes: {} })
   const [assetLibrary, setAssetLibrary] = useState<AssetLibrary | null>(null)
@@ -72,6 +89,7 @@ export default function VideoProjectPanel({ projectName }: Props) {
   const [videoModel, setVideoModel] = useState('')
   const [resolutions, setResolutions] = useState<string[]>([])
   const [ratioGroups, setRatioGroups] = useState<Record<string, string[]>>({})
+  const [videoDurations, setVideoDurations] = useState<number[]>([5, 10])
   const [selectedRatio, setSelectedRatio] = useState('')
   const [videoResolution, setVideoResolution] = useState('')
   const [duration, setDuration] = useState(5)
@@ -104,6 +122,11 @@ export default function VideoProjectPanel({ projectName }: Props) {
   const [concatResult, setConcatResult] = useState<any>(null)
   const bgmInputRef = useRef<HTMLInputElement>(null)
 
+  const [refUrlInput, setRefUrlInput] = useState('')
+  const [showRefHistory, setShowRefHistory] = useState(false)
+  const [refHistoryImages, setRefHistoryImages] = useState<{ name: string; url: string }[]>([])
+  const [refHistoryLoading, setRefHistoryLoading] = useState(false)
+
   // Shots expanded state
   const [expandedEpisodes, setExpandedEpisodes] = useState<Record<string, boolean>>({})
   const [expandedScenes, setExpandedScenes] = useState<Record<string, boolean>>({})
@@ -112,12 +135,28 @@ export default function VideoProjectPanel({ projectName }: Props) {
     fetchVideoResolutions().then(r => {
       setResolutions(r.resolutions)
       setRatioGroups(r.groups)
+      setVideoDurations((r as any).durations || [5, 10])
       const ratios = Object.keys(r.groups)
       const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
       setSelectedRatio(first)
       setVideoResolution(r.resolutions[0] || '1280x720')
     })
   }, [])
+
+  useEffect(() => {
+    if (!videoModel) return
+    fetchVideoResolutions(videoModel).then(r => {
+      setResolutions(r.resolutions)
+      setRatioGroups(r.groups)
+      setVideoDurations((r as any).durations || [5, 10])
+      const ratios = Object.keys(r.groups)
+      const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
+      setSelectedRatio(first)
+      setVideoResolution(r.resolutions[0] || '1280x720')
+      const durs = (r as any).durations || [5, 10]
+      setDuration(durs[0])
+    })
+  }, [videoModel])
 
   useEffect(() => {
     if (promptRef.current) {
@@ -128,7 +167,8 @@ export default function VideoProjectPanel({ projectName }: Props) {
 
   useEffect(() => {
     fetchSettings().then(s => {
-      if ((s as any)?.video_model && !videoModel) setVideoModel((s as any).video_model)
+      const m = (s as any)?.aggregated_video_model || (s as any)?.video_model
+      if (m && !videoModel) setVideoModel(m)
     }).catch(() => {})
   }, [])
 
@@ -136,9 +176,10 @@ export default function VideoProjectPanel({ projectName }: Props) {
     if (!projectName) return
     setLoading(true)
     Promise.all([
-      fetchCharacters(projectName).then(setCharacters),
-      fetchScenes(projectName).then(setScenes),
-      fetchProps(projectName).then(setPropsList),
+      fetchImageDemands(projectName).then(data => {
+        setImageDemands(data)
+        if (data?.characters) setCharacters(data.characters)
+      }),
       loadShots(projectName),
       fetchProjectVisualAssets(projectName).then(setProjectImages),
       fetchConfirmedImages(projectName).then(setConfirmedImages),
@@ -293,27 +334,80 @@ export default function VideoProjectPanel({ projectName }: Props) {
   }, [selectedShotIndices, shots])
 
   // File handling
+  const addRefFile = (file: File, label: string, type: RefFile['type']) => {
+    const reader = new FileReader()
+    reader.onload = (ev) => setRefFiles(prev => [...prev, { file, preview: ev.target?.result as string, label, type }])
+    reader.readAsDataURL(file)
+  }
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || [])
-    for (const file of selected) {
-      const reader = new FileReader()
-      reader.onload = (ev) => setRefFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-      reader.readAsDataURL(file)
-    }
+    Array.from(e.target.files || []).forEach(f => addRefFile(f, '手动上传', 'image'))
   }
 
   const removeFile = (i: number) => setRefFiles(prev => prev.filter((_, idx) => idx !== i))
 
-  // Add project image as reference
+  const updateLabel = (i: number, label: string) => {
+    setRefFiles(prev => prev.map((rf, idx) => idx === i ? { ...rf, label } : rf))
+    setEditingLabel(null)
+  }
+
+  const handleUrlAdd = async () => {
+    const u = refUrlInput.trim()
+    if (!u) return
+    try {
+      const resp = await fetch(u)
+      const blob = await resp.blob()
+      const file = new File([blob], 'ref_url.png', { type: blob.type || 'image/png' })
+      addRefFile(file, 'URL图片', 'image')
+    } catch {}
+    setRefUrlInput('')
+  }
+
+  const openRefHistory = async () => {
+    setShowRefHistory(true)
+    setRefHistoryLoading(true)
+    try {
+      const h = await fetchGenerationHistory()
+      const all = [...(h.images_free || []), ...(h.images_project || [])]
+      setRefHistoryImages(all)
+    } catch {} finally {
+      setRefHistoryLoading(false)
+    }
+  }
+
+  const addHistoryRef = async (url: string) => {
+    try {
+      const resp = await fetch(url)
+      const blob = await resp.blob()
+      const file = new File([blob], 'history_ref.png', { type: blob.type || 'image/png' })
+      addRefFile(file, '历史作品', 'image')
+    } catch {}
+  }
+
   const addProjectImage = async (url: string, name: string) => {
+    const isChar = selectedCharNames.includes(name) || Object.keys(confirmedImages.characters).includes(name)
+    const label = isChar ? `角色·${name}` : `场景·${name}`
+    const type: RefFile['type'] = isChar ? 'character' : 'scene'
     try {
       const resp = await fetch(url)
       const blob = await resp.blob()
       const file = new File([blob], `${name}.png`, { type: 'image/png' })
-      const reader = new FileReader()
-      reader.onload = (ev) => setRefFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
-      reader.readAsDataURL(file)
+      addRefFile(file, label, type)
     } catch {}
+  }
+
+  const detectTypeFromName = (name: string): RefFile['type'] => {
+    if (selectedCharNames.includes(name)) return 'character'
+    if (selectedSceneNames.includes(name)) return 'scene'
+    return 'image'
+  }
+
+  // Prompt injection for reference labels
+  const buildPromptWithLabels = (basePrompt: string) => {
+    const labeled = refFiles.filter(rf => rf.label && rf.label !== '手动上传' && rf.label !== 'URL图片' && rf.label !== '历史作品')
+    if (labeled.length === 0) return basePrompt
+    const refLines = labeled.map((rf, i) => `图${i+1}=${rf.label}`).join('\n')
+    return `[参考图标注]\n${refLines}\n[/参考图标注]\n\n${basePrompt}`
   }
 
   // Single generate
@@ -325,9 +419,13 @@ export default function VideoProjectPanel({ projectName }: Props) {
     const startTime = Date.now()
     const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
     try {
+      const labeledPrompt = buildPromptWithLabels(prompt)
       const files = refFiles.length > 0 ? refFiles.map(f => f.file) : undefined
-      const res = await freeVideoGen(prompt, files, videoModel, videoResolution || undefined, undefined, generateAudio, duration)
+      const res = await freeVideoGen(labeledPrompt, files, videoModel, videoResolution || undefined, undefined, generateAudio, duration)
       setResult(res)
+      if (res.video_url) {
+        setHistoryVideos(prev => [{ url: res.video_url, label: '单次生成', time: Date.now() }, ...prev.slice(0, 19)])
+      }
     } catch (e: any) {
       setResult({ error: e.message })
     }
@@ -431,7 +529,15 @@ export default function VideoProjectPanel({ projectName }: Props) {
     } catch {}
   }
 
-  const restoreCheckpoint = (proj: string) => {
+  const restoreCheckpoint = async (proj: string) => {
+    try {
+      const data = await fetchVideoShotStatus(proj)
+      if (data.shotStatuses && Object.keys(data.shotStatuses).length > 0) {
+        setShotStatuses(data.shotStatuses || {})
+        setShotVideoUrls(data.shotVideoUrls || {})
+        setBatchedBefore(true)
+      }
+    } catch {}
     try {
       const raw = localStorage.getItem(`video_gen_cp_${proj}`)
       if (!raw) return
@@ -441,8 +547,8 @@ export default function VideoProjectPanel({ projectName }: Props) {
         return
       }
       if (cp.shotStatuses && Object.keys(cp.shotStatuses).length > 0) {
-        setShotStatuses(cp.shotStatuses || {})
-        setShotVideoUrls(cp.shotVideoUrls || {})
+        setShotStatuses(prev => ({ ...cp.shotStatuses, ...prev }))
+        setShotVideoUrls(prev => ({ ...cp.shotVideoUrls, ...prev }))
         setBatchedBefore(true)
       }
     } catch {}
@@ -537,10 +643,10 @@ export default function VideoProjectPanel({ projectName }: Props) {
   return (
     <div>
       {/* Project selector + extract */}
-      <div className="glass-card rounded-2xl p-5 mb-6">
+      <div className="premium-panel p-5 mb-6 premium-glow-bottom">
         <div className="flex items-end gap-4">
           <div className="flex-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">当前项目</label>
+            <label className="premium-label">当前项目</label>
             <p className="text-sm font-medium">{projectName}</p>
           </div>
           <button onClick={handleExtract} disabled={extracting}
@@ -563,87 +669,182 @@ export default function VideoProjectPanel({ projectName }: Props) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Characters + Scenes */}
+        {/* Left: Characters + Scenes + Props */}
         <div className="lg:col-span-1 space-y-4">
-          <div className="glass-card rounded-2xl p-4 border-2 border-primary/10">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-xs">🧑 角色 ({characters.length})</h3>
+          <div className="premium-subpanel p-4 premium-glow-bottom">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-xs" style={{ color: 'rgba(167, 139, 250, 0.7)' }}>🧑 角色 ({(imageDemands?.character_groups || []).length}组)</h3>
               {selectedCharNames.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary font-medium">{selectedCharNames.length} 已选</span>}
             </div>
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : characters.length === 0 ? (
-              <p className="text-[10px] text-muted-foreground">点击「视觉提取」</p>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (imageDemands?.character_groups || []).length === 0 ? (
+              <p className="text-[10px]" style={{ color: 'rgba(255, 255, 255, 0.3)' }}>暂未分析，请先生成需求清单</p>
             ) : (
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {characters.map((c: any) => {
-                  const sel = selectedCharNames.includes(c.name)
-                  const imgs = confirmedImages.characters[c.name]
+                {(imageDemands?.character_groups || []).map((group: any) => {
+                  const members = group.members || []
+                  const baseMember = members.find((m: any) => m.is_base) || members[0]
+                  const baseName = baseMember?.name || group.name
+                  const isSelected = selectedCharNames.includes(baseName) || members.some((m: any) => selectedCharNames.includes(m.name))
+                  const hasChildren = members.length > 1
+                  const expanded = expandedCharGroups[group.name]
+                  const imgs = confirmedImages.characters[baseName]
+                  const charPropsMap = imageDemands?.char_props || {}
+                  const groupProps: any[] = []
+                  for (const [owner, items] of Object.entries(charPropsMap)) {
+                    if (owner === group.name || owner.startsWith(group.name + '（') || owner.startsWith(group.name + '(') || owner === group.name.replace(/^系统/, '').replace(/【】/, '')) {
+                      groupProps.push(...(items as any[]))
+                    }
+                  }
                   return (
-                    <button key={c._file} onClick={() => toggleChar(c.name)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[11px] text-left transition-all ${
-                        sel ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
-                      }`}>
-                      {sel ? <CheckSquare className="w-4 h-4 text-primary flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground/40 flex-shrink-0" />}
-                      <span className="flex-1 truncate">{c.name}</span>
-                      {imgs?.length ? <img src={imgs[0].url} alt="" className="w-6 h-6 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(imgs[0].url) }} /> : null}
-                    </button>
+                    <div key={group.name}>
+                      <div onClick={() => toggleChar(baseName)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                          isSelected ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
+                        }`}>
+                        {hasChildren && (
+                          <button onClick={(e) => { e.stopPropagation(); setExpandedCharGroups(prev => ({ ...prev, [group.name]: !prev[group.name] })) }}
+                            className="p-0.5 hover:text-foreground">
+                            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                          </button>
+                        )}
+                        {isSelected ? <CheckSquare className="w-3 h-3 text-primary flex-shrink-0" /> : <Square className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />}
+                        <span className="flex-1 truncate">{group.name}</span>
+                        {imgs?.length ? <img src={imgs[0].url} alt="" className="w-5 h-5 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(imgs[0].url) }} /> : null}
+                      </div>
+                      {expanded && hasChildren && members.filter((m: any) => !m.is_base).map((member: any) => {
+                        const mSel = selectedCharNames.includes(member.name)
+                        const mImgs = confirmedImages.characters[member.name]
+                        return (
+                          <div key={member.name} onClick={() => toggleChar(member.name)}
+                            className={`flex items-center gap-1.5 ml-4 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                              mSel ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted text-muted-foreground/80'
+                            }`}>
+                            <ChevronRight className="w-2.5 h-2.5 opacity-50" />
+                            <span className="truncate">{member.variant_name || member.name}</span>
+                            {mImgs?.length ? <img src={mImgs[0].url} alt="" className="w-4 h-4 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(mImgs[0].url) }} /> : null}
+                          </div>
+                        )
+                      })}
+                      {expanded && groupProps.length > 0 && (
+                        <div className="ml-4 space-y-0.5 mt-0.5 mb-1">
+                          <div className="text-[9px] text-muted-foreground/50 px-1">🔧 随身道具 · {groupProps.length}个</div>
+                          {groupProps.map((prop: any) => (
+                            <div key={prop.name} onClick={(e) => { e.stopPropagation(); setSelectedProp(prop.name) }}
+                              className={`flex items-center gap-1.5 px-3 py-0.5 rounded cursor-pointer text-[10px] transition-all ${
+                                selectedProp === prop.name ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted text-muted-foreground/60'
+                              }`}>
+                              <span className="truncate">{prop.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </div>
             )}
           </div>
-          <div className="glass-card rounded-2xl p-4 border-2 border-primary/10">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-xs">🌆 场景 ({scenes.length})</h3>
+
+          <div className="premium-subpanel p-4 premium-glow-bottom">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-xs" style={{ color: 'rgba(167, 139, 250, 0.7)' }}>🏔️ 场景 ({(imageDemands?.scene_groups || []).length}组)</h3>
               {selectedSceneNames.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary font-medium">{selectedSceneNames.length} 已选</span>}
             </div>
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : scenes.length === 0 ? (
-              <p className="text-[10px] text-muted-foreground">点击「视觉提取」</p>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (imageDemands?.scene_groups || []).length === 0 ? (
+              <p className="text-[10px]" style={{ color: 'rgba(255, 255, 255, 0.3)' }}>暂未分析</p>
             ) : (
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {scenes.map((s: any) => {
-                  const sel = selectedSceneNames.includes(s.name)
-                  const imgs = confirmedImages.scenes[s.name]
+                {(imageDemands?.scene_groups || []).map((group: any) => {
+                  const members = group.members || []
+                  const baseMember = members.find((m: any) => m.is_base) || members[0]
+                  const baseName = baseMember?.name || group.name
+                  const isSelected = selectedSceneNames.includes(baseName) || members.some((m: any) => selectedSceneNames.includes(m.name))
+                  const hasChildren = members.length > 1
+                  const expanded = expandedSceneTemp[group.name]
+                  const imgs = confirmedImages.scenes[baseName]
                   return (
-                    <button key={s._file} onClick={() => toggleScene(s.name)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[11px] text-left transition-all ${
-                        sel ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
-                      }`}>
-                      {sel ? <CheckSquare className="w-4 h-4 text-primary flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground/40 flex-shrink-0" />}
-                      <span className="flex-1 truncate">{s.name}</span>
-                      {imgs?.length ? <img src={imgs[0].url} alt="" className="w-6 h-6 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(imgs[0].url) }} /> : null}
-                    </button>
+                    <div key={group.name}>
+                      <div onClick={() => toggleScene(baseName)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                          isSelected ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
+                        }`}>
+                        {hasChildren && (
+                          <button onClick={(e) => { e.stopPropagation(); setExpandedSceneTemp(prev => ({ ...prev, [group.name]: !prev[group.name] })) }}
+                            className="p-0.5 hover:text-foreground">
+                            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                          </button>
+                        )}
+                        {isSelected ? <CheckSquare className="w-3 h-3 text-primary flex-shrink-0" /> : <Square className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />}
+                        <span className="flex-1 truncate">{group.name}</span>
+                        {imgs?.length ? <img src={imgs[0].url} alt="" className="w-5 h-5 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(imgs[0].url) }} /> : null}
+                      </div>
+                      {expanded && hasChildren && members.filter((m: any) => !m.is_base).map((member: any) => {
+                        const mSel = selectedSceneNames.includes(member.name)
+                        const mImgs = confirmedImages.scenes[member.name]
+                        return (
+                          <div key={member.name} onClick={() => toggleScene(member.name)}
+                            className={`flex items-center gap-1.5 ml-4 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                              mSel ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted text-muted-foreground/80'
+                            }`}>
+                            <ChevronRight className="w-2.5 h-2.5 opacity-50" />
+                            <span className="truncate">{member.variant_name || member.name}</span>
+                            {mImgs?.length ? <img src={mImgs[0].url} alt="" className="w-4 h-4 rounded object-cover border border-border/40" onClick={e => { e.stopPropagation(); setPreviewSrc(mImgs[0].url) }} /> : null}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )
                 })}
               </div>
             )}
           </div>
-          <div className="glass-card rounded-2xl p-4 border-2 border-primary/10">
-            <h3 className="font-semibold text-xs mb-3">🔧 配饰/道具</h3>
-            {(characters || []).filter(c => (c.accessories || []).length > 0).length === 0 ? (
-              <p className="text-[10px] text-muted-foreground">暂无配饰数据</p>
-            ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {characters.filter(c => (c.accessories || []).length > 0).map(c =>
-                  (c.accessories || []).map(prop => (
-                    <div key={`${c.name}/${prop}`} className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground">
-                      <span className="text-[10px]">🎒</span>
-                      <span className="truncate">{c.name} · {prop}</span>
-                    </div>
-                  ))
-                )}
+
+          {(imageDemands?.cross_scene_props || []).length > 0 && (
+            <div className="premium-subpanel p-4 premium-glow-bottom">
+              <h3 className="font-semibold text-xs mb-2" style={{ color: 'rgba(167, 139, 250, 0.7)' }}>🔧 跨场景道具 ({(imageDemands?.cross_scene_props).length}个)</h3>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {(imageDemands?.cross_scene_props || []).map((prop: any) => (
+                  <div key={prop.name} onClick={() => { setSelectedProp(selectedProp === prop.name ? null : prop.name) }}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                      selectedProp === prop.name ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
+                    }`}>
+                    {selectedProp === prop.name ? <CheckSquare className="w-3 h-3 text-primary flex-shrink-0" /> : <Square className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />}
+                    <span className="truncate">{prop.name}</span>
+                    <span className="text-[8px] text-muted-foreground/40 flex-shrink-0 ml-auto">{prop.scene_count || 0}景</span>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+          {(imageDemands?.scene_props || []).length > 0 && (
+            <div className="premium-subpanel p-4 premium-glow-bottom">
+              <h3 className="font-semibold text-xs mb-2" style={{ color: 'rgba(167, 139, 250, 0.7)' }}>🏗️ 场景道具 ({(imageDemands?.scene_props).length}个)</h3>
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {(imageDemands?.scene_props || []).map((prop: any) => (
+                  <div key={prop.name} onClick={() => { setSelectedProp(selectedProp === prop.name ? null : prop.name) }}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all ${
+                      selectedProp === prop.name ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground border border-transparent'
+                    }`}>
+                    {selectedProp === prop.name ? <CheckSquare className="w-3 h-3 text-primary flex-shrink-0" /> : <Square className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />}
+                    <span className="truncate">{prop.name}</span>
+                    <span className="text-[8px] text-muted-foreground/40 flex-shrink-0 ml-auto">{prop.scene_count || 0}景</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Shots + Prompt + Params + Generate */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Shots list */}
-          <div className="glass-card rounded-2xl p-4 border-2 border-accent/20">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-xs">🎬 分镜 ({shots.length})</h3>
-              <div className="flex items-center gap-2">
-                <button onClick={toggleAllShots} className="text-[10px] text-muted-foreground hover:text-primary px-2 py-0.5 rounded hover:bg-muted transition-all">
+        <div className="lg:col-span-2 space-y-3">
+          {/* Shots list — compact */}
+          <div className="premium-panel p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-xs">
+                🎬 分镜 ({shots.length}) {selectedShotIndices.length > 0 && <span className="text-primary">· 已选{selectedShotIndices.length}镜</span>}
+              </h3>
+              <div className="flex items-center gap-1.5">
+                <button onClick={toggleAllShots} className="text-[10px] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded hover:bg-muted transition-all">
                   {selectedShotIndices.length === shots.length && shots.length > 0 ? '取消全选' : '全选'}
                 </button>
                 <button onClick={() => loadShots(projectName)} className="p-1 rounded hover:bg-muted"><RefreshCw className="w-3 h-3" /></button>
@@ -652,52 +853,51 @@ export default function VideoProjectPanel({ projectName }: Props) {
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : episodes.length === 0 ? (
               <p className="text-[10px] text-muted-foreground">暂无分镜内容</p>
             ) : (
-              <div className="max-h-[60vh] overflow-y-auto space-y-1">
+              <div className="space-y-0.5 max-h-[22vh] overflow-y-auto">
                 {episodes.map((ep, epIdx) => {
                   const epExpanded = expandedEpisodes[ep.label] ?? (epIdx === 0)
                   const setEpExp = (v: boolean) => setExpandedEpisodes(prev => ({ ...prev, [ep.label]: v }))
+                  const epDone = ep.scenes.reduce((s, sc) => s + sc.shots.filter(sh => shotStatuses[sh.index] === 'done').length, 0)
+                  const epTotal = ep.scenes.reduce((s, sc) => s + sc.shots.length, 0)
                   return (
                     <div key={ep.label}>
-                      <button onClick={() => setEpExp(!epExpanded)}
-                        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium hover:bg-muted/60 transition-all">
-                        {epExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                        📺 {ep.label} ({ep.scenes.reduce((s, sc) => s + sc.shots.length, 0)}镜)
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setEpExp(!epExpanded)} className="p-0.5 hover:text-foreground flex-shrink-0">
+                          {epExpanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+                        </button>
+                        <span className="text-[10px] font-medium text-muted-foreground flex-1 truncate">
+                          📺 {ep.label}
+                        </span>
+                        <span className="text-[9px] text-muted-foreground/50 flex-shrink-0">{epDone}/{epTotal}</span>
+                      </div>
                       {epExpanded && (
-                        <div className="ml-4 space-y-0.5">
+                        <div className="ml-4 flex flex-wrap gap-1 py-0.5">
                           {ep.scenes.map(sc => {
-                            const scKey = `${ep.label}/${sc.label}`
-                            const scExpanded = expandedScenes[scKey] ?? false
-                            const setScExp = (v: boolean) => setExpandedScenes(prev => ({ ...prev, [scKey]: v }))
+                            const scExpanded = expandedScenes[`${ep.label}/${sc.label}`] ?? false
+                            const setScExp = (v: boolean) => setExpandedScenes(prev => ({ ...prev, [`${ep.label}/${sc.label}`]: v }))
                             return (
-                              <div key={scKey}>
+                              <div key={`${ep.label}/${sc.label}`}>
                                 <button onClick={() => setScExp(!scExpanded)}
-                                  className="w-full flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] text-muted-foreground hover:bg-muted/40 transition-all">
-                                  {scExpanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
-                                  🎞 {sc.label} ({sc.shots.length}镜)
+                                  className="text-[9px] text-muted-foreground/60 hover:text-muted-foreground px-1.5 py-0.5 rounded hover:bg-muted/40 transition-all">
+                                  🎞 {sc.label} ({sc.shots.length})
                                 </button>
                                 {scExpanded && (
-                                  <div className="ml-4 space-y-0.5">
+                                  <div className="flex flex-wrap gap-0.5 ml-1 mt-0.5 mb-1">
                                     {sc.shots.map(shot => {
                                       const sel = selectedShotIndices.includes(shot.index)
+                                      const status = shotStatuses[shot.index]
                                       return (
-                                        <div key={shot.index}>
-                                          <button onClick={() => toggleShot(shot.index)}
-                                            className={`w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-[10px] text-left transition-all ${
-                                              sel ? 'bg-primary/20 text-primary font-medium border border-primary/30' : 'hover:bg-muted/80 text-muted-foreground/80 border border-transparent'
-                                            }`}>
-                                            {sel ? <CheckSquare className="w-3 h-3 text-primary flex-shrink-0" /> : <Square className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />}
-                                            <span className="flex-1 truncate">镜头{shot.shot_number} {shot.scene_name ? `· ${shot.scene_name}` : ''}</span>
-                                            {shotStatuses[shot.index] === 'done' && <span className="text-green-400 text-[9px] ml-1 cursor-pointer hover:text-green-300" onClick={e => { e.stopPropagation(); setExpandedPreviews(p => ({ ...p, [String(shot.index)]: !p[String(shot.index)] })) }} title="预览">▶</span>}
-                                            {shotStatuses[shot.index] === 'done' && <span className="text-green-400 text-[9px] ml-0.5">✓</span>}
-                                            {shotStatuses[shot.index] === 'failed' && <span className="text-red-400 text-[9px] ml-1">✗</span>}
-                                          </button>
-                                          {expandedPreviews[String(shot.index)] && shotVideoUrls[shot.index] && (
-                                            <div className="ml-4 mt-1">
-                                              <video src={shotVideoUrls[shot.index]} controls className="w-full max-w-xs rounded-lg border border-border/40" style={{ maxHeight: 180 }} />
-                                            </div>
-                                          )}
-                                        </div>
+                                        <button key={shot.index} onClick={() => toggleShot(shot.index)}
+                                          className={`text-[9px] px-1.5 py-0.5 rounded transition-all flex items-center gap-0.5 ${
+                                            sel ? 'bg-primary/20 text-primary font-medium border border-primary/30' :
+                                            status === 'done' ? 'bg-green-500/5 text-green-400/80' :
+                                            status === 'failed' ? 'bg-red-500/5 text-red-400/80' :
+                                            'hover:bg-muted text-muted-foreground/70 border border-transparent'
+                                          }`}>
+                                          镜头{shot.shot_number}
+                                          {status === 'done' && ' ✓'}
+                                          {status === 'failed' && ' ✗'}
+                                        </button>
                                       )
                                     })}
                                   </div>
@@ -715,221 +915,236 @@ export default function VideoProjectPanel({ projectName }: Props) {
           </div>
 
           {/* Prompt */}
-          <div className="glass-card rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">提示词</label>
-              <button onClick={() => setPrompt('')} className="text-[10px] text-muted-foreground hover:text-red-400 px-2 py-0.5 rounded hover:bg-red-400/5 transition-all">清空</button>
+          <div className="premium-panel p-5">
+            <div className="premium-header">
+              <label className="premium-label" style={{ marginBottom: 0 }}>提示词</label>
+              <button onClick={() => setPrompt('')} className="text-[10px] text-rose-400/60 hover:text-rose-400 px-2 py-0.5 rounded hover:bg-rose-400/5 transition-all">清空</button>
             </div>
             <textarea ref={promptRef} value={prompt} onChange={e => setPrompt(e.target.value)}
               placeholder={`在左侧勾选角色/场景/分镜，提示词将自动组合。\n也可以手动输入。`}
-              className="w-full bg-muted border border-border rounded-xl px-4 py-3 min-h-[8rem] resize-none text-sm font-mono" />
+              className="w-full premium-input rounded-xl px-4 py-3 min-h-[8rem] resize-none text-sm font-mono" />
 
             {/* Reference images */}
             <div className="mt-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] text-muted-foreground font-medium">参考图</span>
-                <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-primary px-2 py-0.5 rounded hover:bg-primary/10 transition-all">
-                  + 上传
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  参考图 {refFiles.length > 0 && <span className="text-primary">({refFiles.length})</span>}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={openRefHistory} className="text-[10px] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded hover:bg-primary/10 transition-all">
+                    历史
+                  </button>
+                  <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-primary px-1.5 py-0.5 rounded hover:bg-primary/10 transition-all">
+                    上传
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileSelect} />
+                </div>
               </div>
+
+              {/* URL paste row */}
+              <div className="flex items-center gap-1 mb-2">
+                <input value={refUrlInput} onChange={e => setRefUrlInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleUrlAdd() } }}
+                  placeholder="粘贴图片 URL，回车添加..."
+                  className="flex-1 bg-transparent border-b border-border/30 pb-1 text-[10px] text-muted-foreground outline-none focus:border-primary/30 transition-colors" />
+                <button onClick={handleUrlAdd} disabled={!refUrlInput.trim()}
+                  className="text-[10px] text-primary hover:underline disabled:opacity-30 flex-shrink-0 px-1">添加</button>
+              </div>
+
               {refFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-2">
+                <div className="flex flex-wrap gap-2 mb-3">
                   {refFiles.map((entry, i) => (
-                    <div key={i} className="relative group">
-                      <img src={entry.preview} alt="" className="w-12 h-12 object-cover rounded-lg" />
-                      <button onClick={() => removeFile(i)}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <X className="w-2.5 h-2.5" />
-                      </button>
+                    <div key={i} className="relative group flex flex-col items-center gap-0.5">
+                      <div className="relative">
+                        <img src={entry.preview} alt="" className="w-14 h-14 object-cover rounded-xl border border-border/40" />
+                        <button onClick={() => removeFile(i)}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                        {entry.type === 'audio' && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl">
+                            <Music className="w-4 h-4 text-white/70" />
+                          </div>
+                        )}
+                      </div>
+                      {editingLabel === i ? (
+                        <input autoFocus value={entry.label}
+                          onChange={e => setRefFiles(prev => prev.map((rf, idx) => idx === i ? { ...rf, label: e.target.value } : rf))}
+                          onBlur={e => updateLabel(i, e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') updateLabel(i, (e.target as HTMLInputElement).value) }}
+                          className="text-[8px] w-16 text-center bg-muted border border-border rounded px-0.5 outline-none focus:border-primary/50" />
+                      ) : (
+                        <span onClick={() => setEditingLabel(i)}
+                          className={`text-[8px] text-center leading-tight cursor-pointer hover:text-primary truncate max-w-[56px] ${
+                            entry.label === '手动上传' || entry.label === 'URL图片' || entry.label === '历史作品'
+                              ? 'text-muted-foreground/40' : 'text-muted-foreground'
+                          }`}>
+                          {entry.label}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
-              {/* 项目素材库自动匹配 */}
-              {assetLibrary && (
-                <div className="mb-3">
-                  <h4 className="text-[10px] font-medium text-muted-foreground mb-1.5">项目素材库</h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(assetLibrary.characters).map(([name, data]) => {
-                      const img = data.latest_confirmed?.images[0]
-                      if (!img) return null
-                      return (
-                        <div key={name}
-                          onClick={() => addProjectImage(img.url, `char_${name}`)}
-                          className="relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer border border-border hover:border-primary/50 transition-all group"
-                          title={`点击添加 ${name}`}>
-                          <img src={img.url} alt={name} className="w-full h-full object-cover" />
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5 truncate leading-none">
-                            {name}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {Object.entries(assetLibrary.scenes).map(([name, data]) => {
-                      const img = data.latest_confirmed?.images[0]
-                      if (!img) return null
-                      return (
-                        <div key={name}
-                          onClick={() => addProjectImage(img.url, `scene_${name}`)}
-                          className="relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer border border-border hover:border-primary/50 transition-all group"
-                          title={`点击添加 ${name}`}>
-                          <img src={img.url} alt={name} className="w-full h-full object-cover" />
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5 truncate leading-none">
-                            {name}
-                          </div>
-                        </div>
-                      )
-                    })}
+
+              {/* History popup */}
+              {showRefHistory && (
+                <div className="mb-3 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-muted-foreground">历史作品 · 点击添加为参考</span>
+                    <button onClick={() => setShowRefHistory(false)} className="text-[9px] text-muted-foreground hover:text-foreground">关闭</button>
                   </div>
-                  <button onClick={() => setShowAllVersions(!showAllVersions)}
-                    className="text-[9px] text-muted-foreground hover:text-foreground mt-1 transition-colors">
-                    {showAllVersions ? '收起所有版本' : '查看所有版本'}
-                  </button>
-                  {showAllVersions && (
-                    <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
-                      {Object.entries(assetLibrary.characters).map(([name, data]) => (
-                        <div key={name}>
-                          <p className="text-[9px] text-muted-foreground mb-1">{name}</p>
-                          <div className="flex flex-wrap gap-1">
-                            {data.all_versions.map(v => (
-                              v.images.slice(0, 1).map((img, i) => (
-                                <img key={`${v.version}-${i}`} src={img.url} alt={`${name} ${v.version}`}
-                                  className={`w-8 h-8 object-cover rounded border cursor-pointer hover:ring-1 hover:ring-primary/50 ${v.confirmed ? 'ring-1 ring-green-400/60' : 'border-border'}`}
-                                  onClick={() => addProjectImage(img.url, `${name}_${v.version}`)}
-                                  title={`${v.version}${v.confirmed ? ' (已确认)' : ''}`} />
-                              ))
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                      {Object.entries(assetLibrary.scenes).map(([name, data]) => (
-                        <div key={name}>
-                          <p className="text-[9px] text-muted-foreground mb-1">{name}</p>
-                          <div className="flex flex-wrap gap-1">
-                            {data.all_versions.map(v => (
-                              v.images.slice(0, 1).map((img, i) => (
-                                <img key={`${v.version}-${i}`} src={img.url} alt={`${name} ${v.version}`}
-                                  className={`w-8 h-8 object-cover rounded border cursor-pointer hover:ring-1 hover:ring-primary/50 ${v.confirmed ? 'ring-1 ring-green-400/60' : 'border-border'}`}
-                                  onClick={() => addProjectImage(img.url, `${name}_${v.version}`)}
-                                  title={`${v.version}${v.confirmed ? ' (已确认)' : ''}`} />
-                              ))
-                            ))}
-                          </div>
-                        </div>
+                  {refHistoryLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                      {refHistoryImages.slice(0, 40).map((img, i) => (
+                        <img key={i} src={img.url} alt={img.name}
+                          onClick={() => addHistoryRef(img.url)}
+                          className="w-12 h-12 object-cover rounded border border-border/40 cursor-pointer hover:ring-1 hover:ring-primary/50 transition-all"
+                          title={img.name} />
                       ))}
                     </div>
                   )}
                 </div>
               )}
-              {/* Project image references */}
-              {Object.keys(projectImages.characters).length > 0 && (
-                <div className="mb-1">
-                  <p className="text-[10px] text-muted-foreground mb-1">👤 角色图</p>
+
+              {/* 项目已生成图库 */}
+              {Object.keys(confirmedImages.characters).length > 0 && (
+                <div className="mb-2">
+                  <p className="text-[10px] text-muted-foreground mb-1.5">👤 角色定妆照 · 点击添加为参考</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(projectImages.characters).slice(0, 6).map(([name, imgs]) =>
-                      (imgs as any[]).slice(0, 1).map((img, i) => (
-                        <img key={`${name}-${i}`} src={img.url} alt={name}
-                          className="w-10 h-10 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50"
-                          onClick={() => addProjectImage(img.url, name)} title={`点击添加${name}`} />
-                      ))
-                    )}
+                    {Object.entries(confirmedImages.characters).map(([name, imgs]) => {
+                      const isSelected = selectedCharNames.includes(name)
+                      const img = (imgs as any[])?.[0]
+                      if (!img) return null
+                      return (
+                        <div key={name} onClick={() => addProjectImage(img.url, name)}
+                          className={`relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${isSelected ? 'border-primary shadow-lg shadow-primary/20' : 'border-border hover:border-primary/50'}`}
+                          title={isSelected ? `${name} (已选中)` : `点击添加 ${name}`}>
+                          <img src={img.url} alt={name} className="w-full h-full object-cover" />
+                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent pt-3 pb-0.5 text-[8px] text-white text-center truncate">
+                            {name}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
-              {Object.keys(projectImages.scenes).length > 0 && (
+              {Object.keys(confirmedImages.scenes).length > 0 && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">🌆 场景图</p>
+                  <p className="text-[10px] text-muted-foreground mb-1.5">🌆 场景概念图 · 点击添加为参考</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(projectImages.scenes).slice(0, 6).map(([name, imgs]) =>
-                      (imgs as any[]).slice(0, 1).map((img, i) => (
-                        <img key={`${name}-${i}`} src={img.url} alt={name}
-                          className="w-10 h-10 object-contain rounded-lg bg-muted border border-border cursor-pointer hover:ring-2 hover:ring-primary/50"
-                          onClick={() => addProjectImage(img.url, name)} title={`点击添加${name}`} />
-                      ))
-                    )}
+                    {Object.entries(confirmedImages.scenes).map(([name, imgs]) => {
+                      const isSelected = selectedSceneNames.includes(name)
+                      const img = (imgs as any[])?.[0]
+                      if (!img) return null
+                      return (
+                        <div key={name} onClick={() => addProjectImage(img.url, name)}
+                          className={`relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${isSelected ? 'border-primary shadow-lg shadow-primary/20' : 'border-border hover:border-primary/50'}`}
+                          title={isSelected ? `${name} (已选中)` : `点击添加 ${name}`}>
+                          <img src={img.url} alt={name} className="w-full h-full object-cover" />
+                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent pt-3 pb-0.5 text-[8px] text-white text-center truncate">
+                            {name}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
             </div>
 
             {/* Parameters */}
-            <div className="space-y-3 mt-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-1">模型</label>
+            <div className="space-y-2.5 mt-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <div className="md:col-span-2">
+                  <label className="premium-label" style={{ fontSize: '0.6rem' }}>模型</label>
                   <ModelSelector type="video" value={videoModel} onChange={setVideoModel} />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] text-muted-foreground block mb-1">比例</label>
-                    <select value={selectedRatio} onChange={e => { const rs = ratioGroups[e.target.value]; setSelectedRatio(e.target.value); if (rs?.length) setVideoResolution(rs[0]) }}
-                      className="w-full bg-muted border border-border rounded-xl px-2 py-2 text-xs">
-                      {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
+                <div>
+                  <label className="premium-label" style={{ fontSize: '0.6rem' }}>比例</label>
+                  <select value={selectedRatio} onChange={e => { const rs = ratioGroups[e.target.value]; setSelectedRatio(e.target.value); if (rs?.length) setVideoResolution(rs[0]) }}
+                    className="w-full premium-select rounded-lg px-2 py-1.5 text-[10px]">
+                    {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="premium-label" style={{ fontSize: '0.6rem' }}>分辨率</label>
+                  <select value={videoResolution} onChange={e => setVideoResolution(e.target.value)} className="w-full premium-select rounded-lg px-2 py-1.5 text-[10px]">
+                    {(ratioGroups[selectedRatio] || resolutions).map(r => (<option key={r} value={r}>{r}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="premium-label" style={{ fontSize: '0.6rem' }}>时长(秒)</label>
+                  <div className="flex gap-0.5">
+                    <select value={duration} onChange={e => { const v = Number(e.target.value); if (v === -1) setDuration(15); else setDuration(v) }}
+                      className="w-full premium-select rounded-lg px-1 py-1.5 text-[10px]">
+                      {videoDurations.map(d => (<option key={d} value={d}>{d}秒</option>))}
+                      <option value={-1}>自定义</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground block mb-1">分辨率</label>
-                    <select value={videoResolution} onChange={e => setVideoResolution(e.target.value)} className="w-full bg-muted border border-border rounded-xl px-2 py-2 text-xs">
-                      {(ratioGroups[selectedRatio] || resolutions).map(r => (<option key={r} value={r}>{r}</option>))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground block mb-1">时长(秒)</label>
-                    <input type="number" min={2} max={12} value={duration} onChange={e => setDuration(Math.max(2, Math.min(12, Number(e.target.value))))} className="w-full bg-muted border border-border rounded-xl px-2 py-2 text-xs text-center" />
+                    {!videoDurations.includes(duration) && (
+                      <input type="number" min={2} max={30} value={duration}
+                        onChange={e => setDuration(Math.max(2, Math.min(30, Number(e.target.value))))}
+                        className="w-14 premium-input rounded-lg px-1 py-1.5 text-[10px] text-center" />
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 flex-wrap">
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" className="sr-only peer" checked={generateAudio} onChange={e => setGenerateAudio(e.target.checked)} />
-                  <div className="w-8 h-4 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-primary"></div>
-                  <span className="text-[10px] text-muted-foreground ml-2">生成音频</span>
+                  <div className="w-7 h-3.5 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+                  <span className="text-[9px] text-muted-foreground ml-1.5">音频</span>
                 </label>
-
-                <label className="relative inline-flex items-center cursor-pointer group">
+                {generateAudio && (
+                  <label className="relative cursor-pointer">
+                    <input type="file" accept="audio/*" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) addRefFile(f, '音色参考', 'audio') }} />
+                    <span className="text-[9px] px-2 py-1 rounded transition-all hover:bg-muted text-muted-foreground border border-border/30">
+                      🔊 音色参考
+                    </span>
+                  </label>
+                )}
+                <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" className="sr-only peer" checked={cameraFixed} onChange={e => setCameraFixed(e.target.checked)} />
-                  <div className="w-8 h-4 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-primary"></div>
-                  <span className="text-[10px] text-muted-foreground ml-2">固定镜头</span>
-                  <span className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-black/80 text-white text-[9px] rounded whitespace-nowrap z-50">镜头不移动，适合对话正反打</span>
+                  <div className="w-7 h-3.5 bg-muted rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+                  <span className="text-[9px] text-muted-foreground ml-1.5">固定镜头</span>
                 </label>
-
                 <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-muted-foreground">种子:</span>
+                  <span className="text-[9px] text-muted-foreground/50">种子</span>
                   <input type="number" value={seed} onChange={e => setSeed(Number(e.target.value))}
-                    placeholder="随机"
-                    className="w-16 text-[10px] bg-muted border border-border rounded-lg px-2 py-1 text-center" />
+                    placeholder="随机" className="w-12 text-[9px] premium-input rounded px-1.5 py-1 text-center" />
                 </div>
               </div>
             </div>
 
             {/* Generate buttons */}
-            <div className="flex items-center gap-3 mt-4">
+            <div className="flex items-center gap-2 mt-3">
               <button onClick={handleGenerate} disabled={generating || !prompt.trim()}
-                className="btn-gradient flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-50">
-                {generating && genMode === 'single' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                {generating && genMode === 'single' ? `生成中 ${elapsed}s` : '生成单段'}
+                className="btn-gradient flex items-center gap-1 px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-50">
+                {generating && genMode === 'single' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                {generating && genMode === 'single' ? `生成中 ${elapsed}s` : refFiles.length > 0 ? `图生 (${refFiles.length}图)` : '文生'}
               </button>
 
               {shots.length > 0 && (
-                <div className="flex items-center gap-2 border-l border-border pl-3">
-                  <span className="text-[10px] text-muted-foreground">批量：镜头</span>
+                <div className="flex items-center gap-1.5 border-l border-border pl-2">
+                  <span className="text-[9px] text-muted-foreground/50">批量</span>
                   <input type="number" min={1} max={shots.length} value={batchStart}
                     onChange={e => setBatchStart(Number(e.target.value))}
-                    className="w-12 bg-muted border border-border rounded-lg px-1.5 py-1 text-xs text-center" />
-                  <span className="text-[10px] text-muted-foreground">到</span>
+                    className="w-10 premium-input rounded px-1 py-1 text-[10px] text-center" />
+                  <span className="text-[9px] text-muted-foreground/50">-</span>
                   <input type="number" min={1} max={shots.length} value={batchEnd}
                     onChange={e => setBatchEnd(Number(e.target.value))}
-                    className="w-12 bg-muted border border-border rounded-lg px-1.5 py-1 text-xs text-center" />
+                    className="w-10 premium-input rounded px-1 py-1 text-[10px] text-center" />
                   <button onClick={handleBatchGenerate} disabled={generating}
-                    className="px-4 py-2 rounded-xl border border-border text-xs hover:bg-muted transition-colors disabled:opacity-50">
+                    className="px-3 py-1 rounded-lg border border-white/10 text-[10px] hover:bg-white/[0.04] transition-colors disabled:opacity-50">
                     {generating && genMode === 'batch' ? <Loader2 className="w-3 h-3 inline animate-spin mr-1" /> : null}
-                    批量生成
+                    生成
                   </button>
                   {generating && (
                     <button onClick={() => { batchPausedRef.current = true; setBatchPaused(true) }}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-400/30 text-amber-400 text-sm hover:bg-amber-500/10 transition-colors">
-                      ⏸ 暂停
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg border border-amber-400/30 text-amber-400 text-[10px] hover:bg-amber-500/10 transition-colors">
+                      ⏸
                     </button>
                   )}
                 </div>
@@ -959,9 +1174,9 @@ export default function VideoProjectPanel({ projectName }: Props) {
                   拼接导出 {showConcatPanel ? '▲' : '▼'}
                 </button>
                 {showConcatPanel && (
-                  <div className="mt-3 p-4 rounded-xl bg-muted/30 border border-border/30 space-y-3">
+                  <div className="mt-3 p-4 rounded-xl premium-inset space-y-3">
                     <div className="flex items-center gap-2">
-                      <Type className="w-3.5 h-3.5 text-muted-foreground" />
+                      <Type className="w-3.5 h-3.5" style={{ color: 'rgba(167, 139, 250, 0.5)' }} />
                       <label className="text-[10px] flex items-center gap-2">
                         <input type="checkbox" checked={!!concatTitle} onChange={e => setConcatTitle(e.target.checked ? projectName || '' : '')}
                           className="rounded border-border" />
@@ -970,11 +1185,11 @@ export default function VideoProjectPanel({ projectName }: Props) {
                       {concatTitle && (
                         <>
                           <input value={concatTitle} onChange={e => setConcatTitle(e.target.value)}
-                            className="flex-1 bg-muted border border-border rounded-lg px-2 py-1 text-[11px]" />
+                            className="flex-1 premium-input rounded-lg px-2 py-1 text-[11px]" />
                           <input type="number" value={concatTitleDuration} min={1} max={10}
                             onChange={e => setConcatTitleDuration(Number(e.target.value))}
-                            className="w-10 bg-muted border border-border rounded-lg px-1 py-1 text-[10px] text-center" />
-                          <span className="text-[10px] text-muted-foreground">秒</span>
+                            className="w-10 premium-input rounded-lg px-1 py-1 text-[10px] text-center" />
+                          <span className="text-[10px]" style={{ color: 'rgba(167, 139, 250, 0.5)' }}>秒</span>
                         </>
                       )}
                     </div>
@@ -1074,6 +1289,35 @@ export default function VideoProjectPanel({ projectName }: Props) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* History: recently generated videos */}
+          {(historyVideos.length > 0 || Object.values(shotVideoUrls).some(Boolean)) && (
+            <div className="premium-panel p-3">
+              <h3 className="font-semibold text-[10px] mb-2">📽️ 已生成视频</h3>
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                {Object.entries(shotVideoUrls).filter(([, url]) => url).map(([idx, url]) => (
+                  <div key={`shot-${idx}`} className="relative group">
+                    <video src={url} className="w-20 h-14 object-cover rounded border border-border/40"
+                      onMouseEnter={e => (e.target as HTMLVideoElement).play()}
+                      onMouseLeave={e => { (e.target as HTMLVideoElement).pause(); (e.target as HTMLVideoElement).currentTime = 0 }} />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5 leading-none">
+                      镜头{idx}
+                    </div>
+                  </div>
+                ))}
+                {historyVideos.map((v, i) => (
+                  <div key={`hist-${i}`} className="relative group">
+                    <video src={v.url} className="w-20 h-14 object-cover rounded border border-border/40"
+                      onMouseEnter={e => (e.target as HTMLVideoElement).play()}
+                      onMouseLeave={e => { (e.target as HTMLVideoElement).pause(); (e.target as HTMLVideoElement).currentTime = 0 }} />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-white text-center py-0.5 leading-none truncate">
+                      {v.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

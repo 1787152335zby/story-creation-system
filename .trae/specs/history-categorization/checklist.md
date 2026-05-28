@@ -1,0 +1,12 @@
+- [x] `free_video_gen` 写入视频元数据（mode/prompt/model/resolution/duration/negative_prompt/timestamp）
+- [x] `generate_project_shot` 写入视频元数据含 project_name
+- [x] `list_generated_history` 返回 `videos_free` / `videos_project` 按 mode 分类
+- [x] `list_generated_history` 保留 `videos` 字段向后兼容
+- [x] 前端 HistoryPage 图片 Tab 有二级筛选 dropdown（自由/项目）
+- [x] 前端 HistoryPage 图片 Tab 项目模式下按 project_name 分组展示
+- [x] 前端 HistoryPage 视频 Tab 有二级筛选 dropdown（自由/项目）
+- [x] 前端 HistoryPage 视频 Tab 项目模式下按 project_name 分组展示
+- [x] 前端 HistoryPage 全部 Tab 视频卡片标注来源标记
+- [x] 空状态/loading 正确处理
+- [x] backend `py_compile` 通过
+- [x] frontend `npm run build` 通过
