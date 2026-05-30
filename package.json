@@ -2,13 +2,18 @@
   "name": "story-creation-web",
   "private": true,
   "version": "1.0.0",
+  "description": "织镜 - 多智能体故事创作系统",
+  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "package": "npm run build && npm run pyinstaller && electron-builder --win",
+    "pyinstaller": "pyinstaller pyinstaller.spec --distpath dist-backend --workpath build-backend --noconfirm",
+    "electron:dev": "vite build && electron ."
   },
   "dependencies": {
     "@types/three": "^0.184.1",
@@ -34,6 +39,8 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "^10.5.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.1",
     "jsdom": "^29.1.1",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.10",

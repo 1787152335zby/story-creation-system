@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(os.environ.get("STORYFORGE_DATA_DIR", str(Path(__file__).resolve().parent.parent)))
 PROJECTS_DIR = BASE_DIR / "projects"
 
 

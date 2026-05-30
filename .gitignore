@@ -70,3 +70,10 @@ gpu-test.html
 *.doc
 *.docx
 *.files/
+
+release/
+dist-backend/
+dist-electron/
+build-backend/
+*.spec.bak
+.codegraph/

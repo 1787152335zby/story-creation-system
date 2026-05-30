@@ -10,6 +10,50 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
+import shutil
+
+DATA_DIR = Path(os.environ.get("STORYFORGE_DATA_DIR", str(ROOT)))
+RESOURCES_DIR = Path(os.environ.get("STORYFORGE_RESOURCES_DIR", str(ROOT)))
+ELECTRON_PORT = os.environ.get("STORYFORGE_PORT", "")
+
+
+def _init_user_data():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    dirs_to_ensure = ["prompts", "config", "memory", "memory/sessions", "projects", "generated"]
+    for d in dirs_to_ensure:
+        (DATA_DIR / d).mkdir(parents=True, exist_ok=True)
+
+    files_to_seed = {
+        "prompts": [
+            "outline_designer.txt", "plot_expander.txt", "screenplay_writer.txt",
+            "storyboarder.txt", "video_producer.txt", "visual_extractor.txt",
+            "image_artist.txt", "outline_direction_card.txt", "outline_full.txt",
+            "prompt_engineer.txt",
+        ],
+        "config": ["image_presets.json"],
+        ".": ["orchestrator_router.txt"],
+    }
+
+    for subdir, filenames in files_to_seed.items():
+        for fname in filenames:
+            dest = DATA_DIR / subdir / fname if subdir != "." else DATA_DIR / fname
+            if not dest.exists():
+                src = RESOURCES_DIR / subdir / fname if subdir != "." else RESOURCES_DIR / fname
+                if src.exists():
+                    shutil.copy2(src, dest)
+
+    env_dest = DATA_DIR / ".env"
+    if not env_dest.exists():
+        env_src = RESOURCES_DIR / ".env.example"
+        if env_src.exists():
+            shutil.copy2(env_src, env_dest)
+
+    load_dotenv(DATA_DIR / ".env", override=True)
+
+
+_init_user_data()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -73,7 +117,7 @@ app.include_router(creation_router, prefix="/api")
 app.include_router(gen_router, prefix="/api")
 app.include_router(prompt_gen_router)
 
-generated_dir = ROOT / "generated"
+generated_dir = DATA_DIR / "generated"
 if generated_dir.exists():
     app.mount("/generated", StaticFiles(directory=str(generated_dir)), name="generated")
 
@@ -87,3 +131,8 @@ if frontend_dist.exists():
         if (frontend_dist / full_path).is_file():
             return FileResponse(frontend_dist / full_path)
         return FileResponse(index)
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("STORYFORGE_PORT", "8000"))
+    uvicorn.run(app, host="127.0.0.1", port=port)

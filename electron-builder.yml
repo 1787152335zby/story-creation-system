@@ -1,0 +1,45 @@
+appId: com.storyforge.app
+productName: "织镜"
+copyright: "Copyright © 2024"
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+
+extraResources:
+  - from: dist-backend/backend.exe
+    to: backend.exe
+  - from: prompts/
+    to: prompts/
+  - from: config/
+    to: config/
+  - from: orchestrator_router.txt
+    to: orchestrator_router.txt
+  - from: .env.example
+    to: .env.example
+
+win:
+  target:
+    - target: nsis
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "织镜"
+  installerLanguages:
+    - zh_CN
+    - en_US
+  language: "2052"
+  unicode: true
+  installerSidebar: null
