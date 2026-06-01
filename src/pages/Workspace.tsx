@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Play, Check, Pencil, X, Loader2, Settings, Sparkles, RefreshCw, ArrowLeft, Zap, ChevronRight } from 'lucide-react'
 import Starfield from '../components/Starfield'
@@ -42,7 +42,7 @@ export default function Workspace() {
   const [redoInstruction, setRedoInstruction] = useState('')
   const [showRedoInput, setShowRedoInput] = useState(false)
   const [redoPhaseIndex, setRedoPhaseIndex] = useState(-1)
-  const [suppressStream, setSuppressStream] = useState(false)
+  const [viewMode, setViewMode] = useState<'stream' | 'history'>('stream')
   const [pendingContinue, setPendingContinue] = useState(false)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [pendingRedo, setPendingRedo] = useState<{ index: number; instruction: string } | null>(null)
@@ -62,6 +62,7 @@ export default function Workspace() {
   const [confirmedPhases, setConfirmedPhases] = useState<number[]>([])
   const [confirmedPhaseId, setConfirmedPhaseId] = useState<number | null>(null)
   const streamHadContent = useRef(false)
+  const lastStreamUpdate = useRef(0)
 
   const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, chunksCompleted, error, episodeConfirm, episodeApprove, episodeRevise, awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase, pausedPhaseIndex } = useWebSocket()
 
@@ -100,7 +101,7 @@ export default function Workspace() {
         // 后台任务正在运行，连接 WS 看实时进度
         setStarted(true)
         setProjectRunning(true)
-        setSuppressStream(false)
+        setViewMode('stream')
         connect(name)
       } else if (typeof config.pending_approval === 'number' && config.pending_approval >= 0) {
         setStarted(true)
@@ -180,6 +181,9 @@ export default function Workspace() {
 
   useEffect(() => {
     if (!streamContent) { setStreamChars(0); return }
+    const now = Date.now()
+    if (now - lastStreamUpdate.current < 300) return
+    lastStreamUpdate.current = now
     setStreamChars(streamContent.length)
   }, [streamContent])
 
@@ -252,7 +256,7 @@ export default function Workspace() {
   const handleResumeGeneration = () => {
     if (!name) return
     if (!connected) { connect(name); setPendingContinue(true); return }
-    setSuppressStream(false)
+    setViewMode('stream')
     setViewContent('')
     setSelectedPhase(-1)
     setContinuing(true)
@@ -283,7 +287,7 @@ export default function Workspace() {
     setSelectedPhase(-1)
     setViewContent('')
     setActFileList([])
-    setSuppressStream(false)
+    setViewMode('stream')
     setStreamDraft('')
   }
   const handleConfirm = () => {
@@ -295,14 +299,14 @@ export default function Workspace() {
       setSelectedPhase(currentPhase)
     }
     setActFileList([])
-    setSuppressStream(true)
+    setViewMode('history')
   }
   const handleProceed = () => {
     proceedGeneration()
     setConfirmedPhaseId(null)
     setViewContent('')
     setSelectedPhase(-1)
-    setSuppressStream(false)
+    setViewMode('stream')
   }
   const handleRevise = () => { if (!feedbackText.trim()) return; revise(currentPhase, feedbackText); setFeedbackText(''); setShowFeedback(false) }
   const handleVersionA = () => { selectVersion('1', versionFeedback); setVersionFeedback(''); setShowVersionFeedback(false) }
@@ -312,7 +316,7 @@ export default function Workspace() {
   const handleRedoPhase = (index: number, instruction: string = '') => {
     if (!projectConfig?.style_type) return
     clearStream()
-    setSuppressStream(false)
+    setViewMode('stream')
     setShowRedoInput(false)
     setConfirmedPhaseId(null)
     setConfirmedPhases(prev => prev.filter(i => i < index))
@@ -405,7 +409,7 @@ export default function Workspace() {
       setSelectedAct('')
       return
     }
-    setSuppressStream(true)
+    setViewMode('history')
     setSelectedPhase(index); setActFileList([]); setSelectedAct(''); setViewContent(''); setLoadingPhase(true)
     try {
       const c = await fetchPhaseContent(projectConfig?.name, PHASE_DIRS[index])
@@ -429,7 +433,7 @@ export default function Workspace() {
 
   const phaseNames = getPhaseNames(projectConfig?.style_type)
   const allDone = (projectConfig?.phases || []).filter((p: any) => p.done).length >= phaseNames.length
-  const showStream = !suppressStream && connected && (streamContent || projectRunning)
+  const isGeneratingStream = connected && (streamContent || projectRunning)
 
   return (
     <div className="flex h-screen relative overflow-hidden">
@@ -441,16 +445,16 @@ export default function Workspace() {
         phases={phases}
         currentPhase={currentPhase}
         streamContent={streamContent}
-        suppressStream={suppressStream}
+        viewMode={viewMode}
         confirmedPhases={confirmedPhases}
         selectedPhase={selectedPhase}
         expandedPhase={expandedPhase}
         actFileList={actFileList}
         selectedAct={selectedAct}
-        showStream={!suppressStream && connected && streamContent}
         connected={connected}
         autoApprove={autoApprove}
         chunksCompleted={chunksCompleted}
+        currentEpisode={currentEpisode}
         onNavigate={navigate}
         onOpenFolder={() => openProjectFolder(name!)}
         onShowTemplateModal={() => setShowTemplateModal(true)}
@@ -576,8 +580,10 @@ export default function Workspace() {
               )}
             </div>
           </div>
-        ) : showStream ? (
+        ) : (connected && currentPhase >= 0 && isGeneratingStream) || (connected && currentPhase >= 0 && viewContent) ? (
           <>
+            {isGeneratingStream && (
+              <div style={{ display: viewMode === 'stream' ? undefined : 'none' }} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-8 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
               <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.80)' }}>
@@ -741,11 +747,11 @@ export default function Workspace() {
                 </div>
               </div>
             )}
-            {showStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && !awaitingEpisodeApproval && pausedPhaseIndex === null && (
+            {isGeneratingStream && streamDone && !awaitingApproval && !awaitingVersion && !isComplete && !awaitingProceed && !awaitingEpisodeApproval && pausedPhaseIndex === null && (
               <div className="border-t border-border/50 p-4 bg-card/80 backdrop-blur-sm">
                 <div className="max-w-5xl mx-auto flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">内容已生成完毕</p>
-                  <button onClick={() => { setViewContent(streamContent); setSelectedPhase(currentPhase); setSuppressStream(true) }}
+                  <button onClick={() => { setViewContent(streamContent); setSelectedPhase(currentPhase); setViewMode('history') }}
                      className="px-4 py-2 rounded-xl text-xs transition-all"
                      style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
@@ -870,9 +876,26 @@ export default function Workspace() {
                 </div>
               </div>
             )}
-          </>
-        ) : viewContent ? (
-          <><div className="flex-1 overflow-y-auto p-10 animate-fade-in">
+              </div>
+            )}
+            <div style={{ display: viewMode === 'history' ? undefined : 'none' }} className="flex-1 flex flex-col overflow-hidden">
+              {isGeneratingStream && viewMode === 'history' && (
+                <div className="px-8 py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.04)' }}>
+                  <div className="max-w-5xl mx-auto flex items-center gap-3 text-xs">
+                    <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'hsl(var(--primary))' }} />
+                    <span style={{ color: 'rgba(255,255,255,0.70)' }}>
+                      {getPhaseNames(projectConfig?.style_type)[currentPhase] || '生成中'} - {streamChars} 字
+                      {currentEpisode ? ` (第${currentEpisode.chunk_index + 1}/${currentEpisode.total_chunks}集)` : ''}
+                    </span>
+                    <span style={{ color: 'rgba(255,255,255,0.40)' }}>{formatTime(elapsedSeconds)}</span>
+                    <button onClick={() => setViewMode('stream')} className="ml-auto px-3 py-1 rounded-lg text-xs transition-all"
+                      style={{ border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.60)' }}>
+                      查看实时
+                    </button>
+                  </div>
+                </div>
+              )}
+            <div className="flex-1 overflow-y-auto p-10 animate-fade-in">
             {/* 暂停中 - 继续生成下一集横幅 */}
             {pausedPhaseIndex !== null && (
               <div className="mb-4 p-4 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-between">
@@ -885,19 +908,6 @@ export default function Workspace() {
                 <button onClick={handleResumeGeneration} className="btn-gradient inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap"
                   style={{ background: 'linear-gradient(135deg, hsl(150, 60%, 50%), hsl(170, 60%, 45%))' }}>
                   <Play className="w-4 h-4" /> 继续生成下一集
-                </button>
-              </div>
-            )}
-            {/* 生成中的横幅提示 */}
-            {streamContent && !confirmedPhaseId && pausedPhaseIndex === null && (
-              <div className="mb-4 p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                  <span className="text-primary font-medium">正在生成 {getPhaseNames(projectConfig?.style_type)[currentPhase] || '...'}</span>
-                  <span className="text-muted-foreground">({Math.min(progress.current + 1, progress.total)}/{progress.total})</span>
-                </div>
-                <button onClick={() => setSuppressStream(false)} className="px-4 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium hover:bg-primary/30 transition-colors">
-                  查看实时生成
                 </button>
               </div>
             )}
@@ -922,7 +932,7 @@ export default function Workspace() {
                 </h3>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {(awaitingEpisodeApproval || pausedPhaseIndex !== null) && (
-                    <button onClick={() => { setSelectedPhase(-1); setViewContent(''); setActFileList([]); setSuppressStream(false) }} className="px-4 py-2 rounded-xl text-xs transition-all"
+                    <button onClick={() => { setSelectedPhase(-1); setViewContent(''); setActFileList([]); setViewMode('stream') }} className="px-4 py-2 rounded-xl text-xs transition-all"
                       style={{ border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.7)' }}
                       onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
                       onMouseOut={(e) => { e.currentTarget.style.background = 'transparent' }}>
@@ -1041,7 +1051,8 @@ export default function Workspace() {
                 </div>
               </div>
             )}
-           </>
+            </div>
+          </>
          ) : connected && currentPhase >= 0 && !viewContent ? (
            <><div className="flex-1 flex flex-col overflow-hidden">
               <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
@@ -1296,7 +1307,7 @@ export default function Workspace() {
           <div className="flex-1 flex flex-col items-center justify-center gap-4 animate-fade-in">
             <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             <p className="text-muted-foreground text-sm">实时生成中...</p>
-            <button onClick={() => setSuppressStream(false)} className="text-xs text-primary hover:underline">查看实时内容</button>
+            <button onClick={() => setViewMode('stream')} className="text-xs text-primary hover:underline">查看实时内容</button>
           </div>
         ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 animate-fade-in">

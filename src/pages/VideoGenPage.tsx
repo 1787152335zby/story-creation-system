@@ -61,6 +61,7 @@ export default function VideoGenPage() {
   const [freeElapsed, setFreeElapsed] = useState(0)
   const [generateAudio, setGenerateAudio] = useState(false)
   const [freeDuration, setFreeDuration] = useState(5)
+  const [resolutionSource, setResolutionSource] = useState<'known' | 'standard'>('standard')
   const [refProjects, setRefProjects] = useState<ProjectInfo[]>([])
   const [selectedRefProject, setSelectedRefProject] = useState('')
   const [refProjectImages, setRefProjectImages] = useState<EntityImagesMap>({ characters: {}, scenes: {} })
@@ -103,6 +104,7 @@ export default function VideoGenPage() {
       fetchVideoResolutions(model || undefined).then(r => {
         setResolutions(r.resolutions)
         setRatioGroups(r.groups)
+        setResolutionSource(r.source === 'known' ? 'known' : 'standard')
         const ratios = Object.keys(r.groups)
         const defaultRatio = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
         setSelectedRatio(defaultRatio)
@@ -115,6 +117,7 @@ export default function VideoGenPage() {
     fetchVideoResolutions(videoModel || undefined).then(r => {
       setResolutions(r.resolutions)
       setRatioGroups(r.groups)
+      setResolutionSource(r.source === 'known' ? 'known' : 'standard')
       const ratios = Object.keys(r.groups)
       const first = ratios.includes('16:9') ? '16:9' : (ratios[0] || '')
       setSelectedRatio(first)
@@ -317,6 +320,9 @@ export default function VideoGenPage() {
                     className="w-full premium-select rounded-xl px-3 py-2.5 text-sm">
                     {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
+                  {resolutionSource === 'standard' && (
+                    <p className="text-[10px] mt-1 opacity-50">此模型使用标准尺寸列表，部分分辨率可能不被支持，遇到报错请更换尺寸</p>
+                  )}
                 </div>
                 <div>
                   <label className="premium-label" style={{ fontSize: '0.625rem' }}>分辨率</label>

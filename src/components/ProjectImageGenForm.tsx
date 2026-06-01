@@ -41,6 +41,7 @@ interface ProjectImageGenFormProps {
   resolutions: string[]
   ratioGroups: Record<string, string[]>
   selectedRatio: string
+  resolutionSource?: 'known' | 'standard'
   projectModel: string
   currentTaskId: string | null
   onCancel: () => void
@@ -135,6 +136,7 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
     resolutions,
     ratioGroups,
     selectedRatio,
+    resolutionSource,
     projectModel,
     currentTaskId,
     onCancel,
@@ -1235,6 +1237,9 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
                     className="w-full premium-select rounded-xl px-3 py-2.5 text-[11px]">
                     {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
+                  {resolutionSource === 'standard' && (
+                    <p className="text-[9px] mt-1 opacity-50">标准尺寸列表，部分可能不被支持，报错请更换尺寸</p>
+                  )}
                 </div>
               </div>
 
@@ -1356,7 +1361,7 @@ const ProjectImageGenForm: React.FC<ProjectImageGenFormProps> = (props) => {
                     <span className="absolute bottom-0 left-0 right-0 text-[7px] text-center truncate px-0.5 bg-black/60 rounded-b-lg">{entry.name}</span>
                     {onRemix && (
                       <button onClick={() => onRemix(entry)}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary/80 text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary/70 text-[8px] flex items-center justify-center transition-colors hover:bg-primary">
                         <Plus className="w-2.5 h-2.5" />
                       </button>
                     )}

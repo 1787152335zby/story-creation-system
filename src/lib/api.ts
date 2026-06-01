@@ -320,20 +320,20 @@ export async function fetchProjectVisualAssets(projectName: string): Promise<Ent
   return result
 }
 
-export async function fetchImageResolutions(model?: string): Promise<{ resolutions: string[]; groups: Record<string, string[]> }> {
+export async function fetchImageResolutions(model?: string): Promise<{ resolutions: string[]; groups: Record<string, string[]>; source: string }> {
   const params = model ? `?model=${encodeURIComponent(model)}` : ''
   const res = await fetch(`${BASE}/image-gen/resolutions${params}`)
-  if (!res.ok) return { resolutions: ['1024x1024', '768x1344', '1344x768'], groups: { '1:1': ['1024x1024'], '4:3': ['768x1344'], '3:4': ['1344x768'] } }
+  if (!res.ok) return { resolutions: ['1024x1024', '540x960', '720x1280', '1080x1920', '768x1024'], groups: { '1:1': ['1024x1024'], '9:16': ['540x960', '720x1280', '1080x1920'], '3:4': ['768x1024'] }, source: 'standard' }
   const data = await res.json()
-  return { resolutions: data.resolutions, groups: data.groups }
+  return { resolutions: data.resolutions, groups: data.groups, source: data.source || 'standard' }
 }
 
-export async function fetchVideoResolutions(model?: string): Promise<{ resolutions: string[]; groups: Record<string, string[]> }> {
+export async function fetchVideoResolutions(model?: string): Promise<{ resolutions: string[]; groups: Record<string, string[]>; durations?: number[]; source: string }> {
   const params = model ? `?model=${encodeURIComponent(model)}` : ''
   const res = await fetch(`${BASE}/video-gen/resolutions${params}`)
-  if (!res.ok) return { resolutions: ['1024x1024', '1280x720', '1920x1080'], groups: { '1:1': ['1024x1024'], '16:9': ['1280x720', '1920x1080'] } }
+  if (!res.ok) return { resolutions: ['1024x1024', '1280x720', '1920x1080'], groups: { '1:1': ['1024x1024'], '16:9': ['1280x720', '1920x1080'] }, source: 'standard' }
   const data = await res.json()
-  return { resolutions: data.resolutions, groups: data.groups }
+  return { resolutions: data.resolutions, groups: data.groups, durations: data.durations, source: data.source || 'standard' }
 }
 
 export async function fetchImageBackends(): Promise<{ value: string; label: string; desc: string }[]> {

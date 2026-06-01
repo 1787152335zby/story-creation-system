@@ -13,16 +13,16 @@ interface Props {
   phases: { status?: string }[]
   currentPhase: number
   streamContent: string
-  suppressStream: boolean
+  viewMode: 'stream' | 'history'
   confirmedPhases: number[]
   selectedPhase: number
   expandedPhase: number
   actFileList: string[]
   selectedAct: string
-  showStream: boolean
   connected: boolean
   autoApprove: boolean
   chunksCompleted: Record<number, ChunkInfo[]>
+  currentEpisode: { phase_index: number; chunk_name: string; chunk_index: number; total_chunks: number } | null
   onNavigate: (path: string) => void
   onOpenFolder: () => void
   onShowTemplateModal: () => void
@@ -34,13 +34,13 @@ interface Props {
 }
 
 export default function PhaseTimeline({
-  name, projectConfig, phases, currentPhase, streamContent, suppressStream,
-  confirmedPhases, selectedPhase, expandedPhase, actFileList, selectedAct, showStream,
-  connected, autoApprove, chunksCompleted, onNavigate, onOpenFolder, onShowTemplateModal,
+  name, projectConfig, phases, currentPhase, streamContent, viewMode,
+  confirmedPhases, selectedPhase, expandedPhase, actFileList, selectedAct,
+  connected, autoApprove, chunksCompleted, currentEpisode, onNavigate, onOpenFolder, onShowTemplateModal,
   onViewPhase, onViewAct, onSetExpandedPhase, onRedo, onAutoApproveChange,
 }: Props) {
   const phaseStatus = (index: number) => {
-    if (index === currentPhase && streamContent && !suppressStream) return 'active'
+    if (index === currentPhase && streamContent) return 'active'
     if (projectConfig?.phases?.[index]?.done || phases[index]?.status === 'done') return 'done'
     if (confirmedPhases.includes(index)) return 'done'
     return 'pending'
@@ -94,9 +94,10 @@ export default function PhaseTimeline({
       <div className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         {getPhaseNames(projectConfig?.style_type).map((pname, i) => {
           const s = phaseStatus(i)
-          const isSelected = selectedPhase === i && !showStream
+          const isSelected = selectedPhase === i
           const canView = s === 'done'
           const hasActs = isSelected && actFileList.length > 1
+          const chunkList = chunksCompleted[i]
           return (
             <div key={i} className="animate-fade-in-up" style={{ animationDelay: `${i * 0.06}s`, opacity: 0 }}>
               <button
@@ -142,6 +143,27 @@ export default function PhaseTimeline({
                   </button>
                 )}
               </button>
+
+              {chunkList && chunkList.length > 0 && (
+                <div className="ml-8 mt-0.5 mb-1 pl-3 animate-fade-in" style={{ borderLeft: '2px solid rgba(74,222,128,0.3)' }}>
+                  {chunkList.map((ch, ci) => {
+                    const isCurrentChunk = currentEpisode && currentEpisode.phase_index === i && currentEpisode.chunk_index === ch.index
+                    return (
+                      <div key={ci} className="text-[10px] py-0.5 flex items-center gap-1" style={{
+                        color: isCurrentChunk ? 'rgba(255,255,255,0.85)' : 'rgba(74,222,128,0.70)',
+                      }}>
+                        <span className="w-1 h-1 rounded-full flex-shrink-0" style={{
+                          background: isCurrentChunk ? 'hsl(var(--primary))' : 'rgba(74,222,128,0.60)',
+                        }} />
+                        <span className="truncate">{ch.name}</span>
+                        {isCurrentChunk && (
+                          <span className="animate-pulse text-[9px]" style={{ color: 'hsl(var(--primary))' }}>生成中</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               {isSelected && hasActs && actFileList.length > 1 && (
                 <div className="ml-8 mt-0.5 mb-1 space-y-0.5 pl-3 animate-fade-in" style={{ borderLeft: '2px solid rgba(255,255,255,0.25)' }}>

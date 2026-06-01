@@ -93,15 +93,22 @@ def _aspect_ratio(w: int, h: int) -> str:
         return "4:3"
     if abs(r - 1.25) < 0.01:
         return "5:4"
+    if abs(r - 1.5) < 0.01:
+        return "3:2"
     if abs(r - 1.6) < 0.01:
         return "16:10"
     if abs(r - 1.778) < 0.01:
         return "16:9"
+    if abs(r - 2.333) < 0.02:
+        return "21:9"
     if abs(r - 0.5625) < 0.02:
         return "9:16"
+    if abs(r - 0.667) < 0.01:
+        return "2:3"
     if abs(r - 0.75) < 0.01:
         return "3:4"
-    # DALL-E 7:4 ratio
+    if abs(r - 0.8) < 0.01:
+        return "4:5"
     if abs(r - 1.75) < 0.01:
         return "7:4"
     if abs(r - 0.571) < 0.01:
@@ -111,7 +118,7 @@ def _aspect_ratio(w: int, h: int) -> str:
 
 def _group_by_ratio(resolutions: list[str]) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
-    order = ["1:1", "4:3", "5:4", "16:10", "16:9", "3:4", "9:16"]
+    order = ["1:1", "3:2", "4:3", "5:4", "16:10", "16:9", "21:9", "2:3", "3:4", "4:5", "9:16"]
     for res in resolutions:
         try:
             w, h = res.split("x")
@@ -686,8 +693,8 @@ def project_demand_batch_gen(req: ProjectImageRequest):
 @router.get("/image-gen/resolutions")
 def list_image_resolutions(model: str = Query(default="")):
     """根据模型返回支持的分辨率及比例分组。不同模型支持不同级别。"""
-    resolutions = _get_image_resolutions(model)
-    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions)}
+    resolutions, source = _get_image_resolutions(model)
+    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions), "source": source}
 
 
 def _next_version(dir_path: Path) -> int:
@@ -1270,10 +1277,10 @@ def _poll_agg_video(api_key: str, base_url: str, task_id: str, timeout: int = 60
 
 @router.get("/video-gen/resolutions")
 def list_video_resolutions(model: str = Query(default="")):
-    resolutions = _get_video_resolutions(model)
+    resolutions, source = _get_video_resolutions(model)
     from tools.model_registry import get_video_durations
     durations = get_video_durations(model) if model else [5, 10]
-    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions), "durations": durations}
+    return {"resolutions": resolutions, "groups": _group_by_ratio(resolutions), "durations": durations, "source": source}
 
 
 @router.get("/gen-files/projects/{project_name}/{subpath:path}")

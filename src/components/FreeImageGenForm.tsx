@@ -17,6 +17,7 @@ interface FreeImageGenFormProps {
   resolutions: string[]
   ratioGroups: Record<string, string[]>
   selectedRatio: string
+  resolutionSource?: 'known' | 'standard'
   freeModel: string
   referenceUrls: string[]
   presets: any[]
@@ -38,17 +39,20 @@ interface FreeImageGenFormProps {
   onPreview?: (src: string) => void
   onFreeRefImagesChange?: (images: FreeRefImage[]) => void
   modelCap?: { max_ref_images: number; supports_img2img: boolean }
+  onRemix?: (img: { url: string; local: string }) => void
+  onDeleteImage?: (img: { url: string; local: string }, index: number) => void
 }
 
 export default function FreeImageGenForm({
   freePrompt, freeNegative, freeSize, freeCount, freeGenerating, freeError, freeResults,
-  resolutions, ratioGroups, selectedRatio, freeModel, referenceUrls,
+  resolutions, ratioGroups, selectedRatio, resolutionSource, freeModel, referenceUrls,
   presets, selectedPreset,
   currentTaskId, onCancel,
   onPromptChange, onNegativeChange, onSizeChange, onCountChange,
   onRatioChange, onModelChange, onReferenceUrlsChange, onReferenceUrlsByTypeChange,
   referenceUrlsByType, onPresetSelect, onGenerate, onClearResults, onPreview,
   onFreeRefImagesChange, modelCap,
+  onRemix, onDeleteImage,
 }: FreeImageGenFormProps) {
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const [freeRefImages, setFreeRefImages] = useState<FreeRefImage[]>([])
@@ -252,6 +256,9 @@ export default function FreeImageGenForm({
                 className="w-full premium-select rounded-xl px-3 py-2.5 text-sm">
                 {Object.keys(ratioGroups).map(r => (<option key={r} value={r}>{r}</option>))}
               </select>
+              {resolutionSource === 'standard' && (
+                <p className="text-[10px] mt-1 opacity-50">此模型使用标准尺寸列表，部分分辨率可能不被支持，遇到报错请更换尺寸</p>
+              )}
             </div>
             <div>
               <label className="premium-label">尺寸</label>
@@ -311,14 +318,37 @@ export default function FreeImageGenForm({
             {freeResults.map((img, i) => {
               const src = img.local ? `/generated/${img.local.split('\\').pop() || img.local.split('/').pop()}` : img.url
               return (
-                <div key={src} className="premium-grid-item" onClick={() => onPreview?.(src)}>
-                  <img src={src} alt="" className="w-full h-56 object-contain bg-white img-hover" />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 pointer-events-none" onClick={e => e.stopPropagation()}>
+                <div key={src} className="premium-grid-item group flex flex-col overflow-hidden">
+                  <img src={src} alt="" className="w-full h-56 object-contain bg-white cursor-pointer" onClick={() => onPreview?.(src)} />
+                  <div className="flex items-center justify-center gap-1.5 p-2 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
                     <button onClick={(e) => { e.stopPropagation(); if (!referenceUrlsByType.character.includes(src)) onReferenceUrlsByTypeChange?.({ ...referenceUrlsByType, character: [...referenceUrlsByType.character, src] }) }}
-                      className="p-2 rounded-lg bg-primary/60 hover:bg-primary text-white pointer-events-auto text-[10px]" title="用作参考图">
+                      className="px-2 py-1 rounded-md text-[10px] transition-colors" style={{ background: 'rgba(167,139,250,0.12)', color: 'rgba(167,139,250,0.85)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(167,139,250,0.25)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(167,139,250,0.12)' }}>
                       参考
                     </button>
-                    <a href={src} download={img.local?.split('\\').pop()?.split('/').pop() || 'image'} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white pointer-events-auto" title="下载"><Download className="w-4 h-4" /></a>
+                    {onRemix && (
+                      <button onClick={(e) => { e.stopPropagation(); onRemix(img) }}
+                        className="px-2 py-1 rounded-md text-[10px] transition-colors" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}>
+                        画同款
+                      </button>
+                    )}
+                    <a href={src} download={img.local?.split('\\').pop()?.split('/').pop() || 'image'} onClick={e => e.stopPropagation()}
+                      className="p-1.5 rounded-md transition-colors flex items-center" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}>
+                      <Download className="w-3 h-3" />
+                    </a>
+                    {onDeleteImage && (
+                      <button onClick={(e) => { e.stopPropagation(); onDeleteImage(img, i) }}
+                        className="p-1.5 rounded-md transition-colors flex items-center" style={{ background: 'rgba(239,68,68,0.12)', color: 'rgba(239,68,68,0.75)' }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.25)' }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)' }}>
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               )

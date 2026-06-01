@@ -155,9 +155,14 @@ IMAGE_MODELS = {
         "name": "Gemini/Google",
         "models": [
             {"value": "gemini-3-pro-preview", "label": "Gemini 3 Pro", "resolutions": _res(
-                "1024x1024", "768x768", "2048x2048", "2560x1440", "3072x3072", "3840x2160", "3840x3840")},
+                "1024x1024", "1024x576", "576x1024", "1024x768", "768x1024",
+                "1024x683", "683x1024", "1024x820", "820x1024", "1024x440",
+                "2048x2048", "2048x1152", "1152x2048", "2048x1536", "1536x2048",
+                "2048x1365", "1365x2048", "2048x1638", "1638x2048", "2048x878",
+                "3072x3072", "3840x2160", "2160x3840", "3840x3840")},
             {"value": "gemini-2.5-flash-preview", "label": "Gemini 2.5 Flash", "resolutions": _res(
-                "1024x1024", "768x768", "2048x2048", "2560x1440", "3072x3072")},
+                "1024x1024", "1024x576", "576x1024", "1024x768", "768x1024",
+                "1024x683", "683x1024", "1024x820", "820x1024", "1024x440")},
         ]
     },
 }
@@ -234,207 +239,63 @@ VIDEO_MODELS = {
 
 
 # =============================================================================
-#  Resolution inference engine — fully rule-based, NO hardcoded model IDs
-#  Any model from any aggregated platform is handled automatically.
+#  Standard resolution lists — fallback for unknown models
+#  Covers ~99% of models in the wild. A model will error if unsupported.
 # =============================================================================
 
-# Base resolutions shared across all image models
-IMAGE_BASE_RESOLUTIONS = [
-    "512x512", "768x768",
-    "1024x576", "1024x768", "1024x1024",
-    "1280x720", "1280x1024",
-    "1440x900",
-    "1920x1080",
+STANDARD_IMAGE_RESOLUTIONS = [
+    "512x512", "768x768", "1024x1024", "2048x2048",
+    "1024x576", "1280x720", "1920x1080", "2048x1152", "2560x1440", "3840x2160",
+    "576x1024", "720x1280", "1080x1920", "1152x2048", "2160x3840",
+    "1024x768", "768x1024", "2048x1536", "1536x2048",
+    "1024x683", "683x1024", "2048x1365", "1365x2048",
+    "1024x820", "820x1024", "2048x1638", "1638x2048",
+    "1024x440", "2048x878",
+    "3840x3840", "3072x3072",
+    "1792x1024", "1024x1792",
 ]
 
-# Base resolutions shared across all video models
-VIDEO_BASE_RESOLUTIONS = [
+STANDARD_VIDEO_RESOLUTIONS = [
     "1024x1024",
-    "540x960",
-    "720x1280",
-    "1280x720",
+    "540x960", "720x1280",
+    "1280x720", "1920x1080", "1080x1920",
+    "3840x2160",
 ]
 
-# Resolution tiers for pattern matching
-IMAGE_RES_TIERS = {
-    "low":     ["512x512", "768x768"],
-    "mid":     ["1024x576", "1024x768", "1024x1024"],
-    "hd":      ["1280x720", "1280x1024", "1440x900"],
-    "full_hd": ["1920x1080"],
-    "2k":      ["2048x2048", "2048x1152", "2560x1440"],
-    "3k":      ["2560x1920", "3072x3072"],
-    "4k":      ["3840x2160", "3840x3840"],
-    "dalle_wide": ["1792x1024", "1024x1792"],
-}
 
-VIDEO_RES_TIERS = {
-    "p480":  ["854x480", "540x960"],
-    "p720":  ["720x1280", "1280x720"],
-    "p1080": ["1920x1080"],
-    "p4k":   ["3840x2160"],
-    "square": ["1024x1024"],
-}
-
-
-def _collect(matches: list[str]) -> list[str]:
-    """Collect unique resolutions from named tiers."""
-    seen: set[str] = set()
-    result: list[str] = []
-    for label in matches:
-        for r in (_get_image_tier(label) if _get_image_tier(label) else _get_video_tier(label) or []):
-            if r not in seen:
-                seen.add(r)
-                result.append(r)
-    return result
-
-
-def _get_image_tier(name: str) -> list[str] | None:
-    return IMAGE_RES_TIERS.get(name)
-
-
-def _get_video_tier(name: str) -> list[str] | None:
-    return VIDEO_RES_TIERS.get(name)
-
-
-# =============================================================================
-#  Video resolution inference
-# =============================================================================
-
-def _infer_video_resolutions(model_id: str) -> list[str]:
-    """Infer supported video resolutions purely from model name patterns."""
+def _lookup_model_resolutions(model_id: str, models_dict: dict) -> list[str] | None:
+    """Look up hardcoded resolutions for a known model. Returns None if not found."""
+    if not model_id:
+        return None
     ml = model_id.lower()
-
-    # === Model family detection ===
-    # Detect the model family and its baseline capabilities
-
-    families_baseline: list[tuple[list[str], list[str]]] = [
-        # (keywords, baseline tier names)
-        (["veo"], ["square", "p480", "p720"]),
-        (["kling"], ["square", "p480", "p720"]),
-        (["seedance"], ["square", "p480", "p720"]),
-        (["sora"], ["square", "p480", "p720"]),
-        (["vidu"], ["square", "p480", "p720"]),
-        (["wan"], ["square", "p480", "p720"]),
-        (["pixverse"], ["square", "p480", "p720"]),
-        (["minimax"], ["square", "p480", "p720"]),
-        (["mochi"], ["square", "p480", "p720"]),
-        (["cogvideo"], ["square", "p480", "p720"]),
-        (["runway", "gen-"], ["square", "p480", "p720"]),
-    ]
-
-    # Default baseline for unknown video models
-    baseline = ["square", "p480", "p720"]
-    for keywords, tiers in families_baseline:
-        if any(k in ml for k in keywords):
-            baseline = tiers
-            break
-
-    # === Edition modifiers ===
-    # "fast", "turbo", "lite" → capped at 720p (no 1080p)
-    # "pro", "plus", "hd", "2k" → add 1080p
-    # "4k", "ultra", "max" → add 4K
-
-    has_speed_edition = any(k in ml for k in ["fast", "turbo", "lite", "draft"])
-    has_pro_edition = any(k in ml for k in ["pro", "plus", "hd", "high", "2k", "1080p"])
-    has_4k_edition = any(k in ml for k in ["4k", "ultra", "max", "2160p", "8k"])
-    has_3d = any(k in ml for k in ["3d", "360"])
-
-    # === Assemble resolutions ===
-    tiers: list[str] = list(baseline)
-
-    # Add p1080 unless it's a speed edition that explicitly doesn't support it
-    if has_pro_edition or has_4k_edition:
-        if "p1080" not in tiers:
-            tiers.append("p1080")
-    elif not has_speed_edition:
-        tiers.append("p1080")
-
-    # Add 4K
-    if has_4k_edition:
-        tiers.append("p4k")
-
-    # Add extra for 3D/360
-    if has_3d:
-        tiers.extend(["p1080", "p4k"])
-
-    # Build final resolution list
-    result: list[str] = []
-    seen: set[str] = set()
-    for t in tiers:
-        res_list = VIDEO_RES_TIERS.get(t, [])
-        for r in res_list:
-            if r not in seen:
-                seen.add(r)
-                result.append(r)
-    return result
+    for provider in models_dict.values():
+        for m in provider.get("models", []):
+            v = m.get("value", "")
+            if v == model_id or v == ml:
+                if "resolutions" in m and m["resolutions"]:
+                    return m["resolutions"]
+    for provider in models_dict.values():
+        for m in provider.get("models", []):
+            v = m.get("value", "")
+            if v and (v in ml or ml in v):
+                if "resolutions" in m and m["resolutions"]:
+                    return m["resolutions"]
+    return None
 
 
-# =============================================================================
-#  Image resolution inference
-# =============================================================================
-
-def _infer_image_resolutions(model_id: str) -> list[str]:
-    """Infer supported image resolutions purely from model name patterns."""
-    ml = model_id.lower()
-
-    # === Capability tiers (highest supported resolution) ===
-    # Each tier builds on the previous one
-
-    families: list[tuple[list[str], list[str]]] = [
-        # (keywords, extra tiers beyond baseline)
-        # Level 0: baseline (512p ~ 1080p)
-        # Level 1: +2K
-        (["flux", "midjourney", "mj_", "qwen-image", "sdxl"], ["2k"]),
-        # Level 2: +2K + DALL-E wide ratios
-        (["dall-e", "dalle"], ["dalle_wide", "2k"]),
-        # Level 3: +3K
-        (["gpt-image", "gpt_image"], ["2k", "3k"]),
-        # Level 4: +4K
-        (["gemini", "banana"], ["2k", "3k", "4k"]),
-    ]
-
-    # Baseline: low + mid + hd + full_hd
-    baseline = ["low", "mid", "hd", "full_hd"]
-    extras: list[str] = []
-    has_seedream = "seedream" in ml
-    has_wan = "wan" in ml and "video" not in ml and "i2v" not in ml
-
-    if has_seedream:
-        extras = ["hd"]
-    elif has_wan:
-        extras = []
-    else:
-        for keywords, extra_tiers in families:
-            if any(k in ml for k in keywords):
-                extras = list(extra_tiers)
-                break
-
-    # Edition modifiers
-    if "turbo" in ml or "fast" in ml:
-        extras = [t for t in extras if t not in ("3k", "4k")]
-
-    if "4k" in ml or "ultra" in ml or "max" in ml:
-        if "4k" not in extras and "4k" in IMAGE_RES_TIERS:
-            extras.append("4k")
-
-    # Build result
-    result: list[str] = []
-    seen: set[str] = set()
-    for t in baseline + extras:
-        res_list = IMAGE_RES_TIERS.get(t, [])
-        for r in res_list:
-            if r not in seen:
-                seen.add(r)
-                result.append(r)
-    return result
+def get_image_resolutions(model_id: str) -> tuple[list[str], str]:
+    """Return (resolutions, source). source is 'known' (exact) or 'standard' (fallback)."""
+    hardcoded = _lookup_model_resolutions(model_id, IMAGE_MODELS)
+    if hardcoded:
+        return (hardcoded, "known")
+    return (list(STANDARD_IMAGE_RESOLUTIONS), "standard")
 
 
-def get_image_resolutions(model_id: str) -> list[str]:
-    return _infer_image_resolutions(model_id)
-
-
-def get_video_resolutions(model_id: str) -> list[str]:
-    return _infer_video_resolutions(model_id)
+def get_video_resolutions(model_id: str) -> tuple[list[str], str]:
+    hardcoded = _lookup_model_resolutions(model_id, VIDEO_MODELS)
+    if hardcoded:
+        return (hardcoded, "known")
+    return (list(STANDARD_VIDEO_RESOLUTIONS), "standard")
 
 
 def get_video_durations(model_id: str) -> list[int]:

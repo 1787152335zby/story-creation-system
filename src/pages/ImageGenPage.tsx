@@ -29,6 +29,7 @@ export default function ImageGenPage() {
   const [freeSelectedRatio, setFreeSelectedRatio] = useState('')
   const [freeModel, setFreeModel] = useState('')
   const [presets, setPresets] = useState<any[]>([])
+  const [resolutionSource, setResolutionSource] = useState<'known' | 'standard'>('standard')
   const [selectedPreset, setSelectedPreset] = useState<any | null>(null)
   const [projSelectedPreset, setProjSelectedPreset] = useState<any | null>(null)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
@@ -98,6 +99,7 @@ export default function ImageGenPage() {
         setFreeRatioGroups(r.groups || {})
         setProjResolutions(r.resolutions)
         setProjRatioGroups(r.groups || {})
+        setResolutionSource(r.source === 'known' ? 'known' : 'standard')
         const prefer = '16:9'
         const firstGroup = (r.groups && r.groups[prefer]) ? prefer : (Object.keys(r.groups || {})[0] || '')
         const firstSize = r.groups?.[firstGroup]?.[0] || r.resolutions?.[0] || ''
@@ -402,6 +404,16 @@ export default function ImageGenPage() {
     toast('已加载历史参数（提示词 + 参考图）', 'success')
   }
 
+  const handleFreeRemix = (img: { url: string; local: string }) => {
+    const src = img.local ? `/generated/${img.local.split('\\').pop() || img.local.split('/').pop()}` : img.url
+    if (!freeRefUrls.includes(src)) setFreeRefUrls(prev => [...prev, src])
+    toast('已添加为参考图', 'success')
+  }
+
+  const handleFreeDelete = (_img: { url: string; local: string }, index: number) => {
+    setFreeResults(prev => prev.filter((_, i) => i !== index))
+  }
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       <Starfield />
@@ -461,6 +473,7 @@ export default function ImageGenPage() {
             resolutions={freeResolutions}
             ratioGroups={freeRatioGroups}
             selectedRatio={freeSelectedRatio}
+            resolutionSource={resolutionSource}
             freeModel={freeModel}
             referenceUrls={freeRefUrls}
             referenceUrlsByType={freeRefUrlsByType}
@@ -482,6 +495,8 @@ export default function ImageGenPage() {
             onClearResults={() => setFreeResults([])}
             onPreview={setPreviewSrc}
             modelCap={freeCap}
+            onRemix={handleFreeRemix}
+            onDeleteImage={handleFreeDelete}
           />
 
         ) : (
@@ -532,6 +547,7 @@ export default function ImageGenPage() {
             resolutions={projResolutions}
             ratioGroups={projRatioGroups}
             selectedRatio={projSelectedRatio}
+            resolutionSource={resolutionSource}
             projectModel={projectModel}
             presets={presets}
             selectedPreset={projSelectedPreset}
@@ -600,10 +616,10 @@ export default function ImageGenPage() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {(showAllFree ? historyFree : historyFree.slice(0, 9)).map((img, i) => (
-                <div key={img.url} className="premium-grid-item group">
-                  <img src={img.url} alt="" className="w-full h-36 object-contain bg-white img-hover"
+                <div key={img.url} className="premium-grid-item group flex flex-col overflow-hidden">
+                  <img src={img.url} alt="" className="w-full h-36 object-contain bg-white cursor-pointer"
                     onClick={() => setPreviewSrc(img.url)} />
-                  <div className="px-2.5 py-2 space-y-1">
+                  <div className="px-2.5 py-1.5 space-y-0.5">
                     <p className="text-[10px] text-white/55 leading-tight truncate">
                       {img.prompt ? img.prompt.slice(0, 40) + (img.prompt.length > 40 ? '...' : '') : '无 prompt'}
                     </p>
@@ -614,17 +630,23 @@ export default function ImageGenPage() {
                       )}
                     </div>
                   </div>
-                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="flex items-center justify-center gap-1.5 p-1.5 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
                     <button onClick={(e) => { e.stopPropagation(); handleRemix(img) }}
-                      className="p-1.5 rounded-lg bg-white/[0.12] hover:bg-white/[0.18] text-white text-[10px] pointer-events-auto" title="画同款">
+                      className="px-2 py-1 rounded-md text-[10px] transition-colors" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}>
                       画同款
                     </button>
-                    <a href={img.url} download={img.name} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white pointer-events-auto" title="下载"
-                      onClick={e => e.stopPropagation()}>
+                    <a href={img.url} download={img.name} onClick={e => e.stopPropagation()}
+                      className="p-1 rounded-md transition-colors flex items-center" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.15)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}>
                       <Download className="w-3 h-3" />
                     </a>
                     <button onClick={async (e) => { e.stopPropagation(); setConfirmDelete({ message: '确认删除这张图片？', action: async () => { try { await deleteGeneratedFile(img.url); setHistoryFree(prev => prev.filter((_, j) => j !== i)); } catch {} } }) }}
-                      className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-white pointer-events-auto" title="删除">
+                      className="p-1 rounded-md transition-colors flex items-center" style={{ background: 'rgba(239,68,68,0.12)', color: 'rgba(239,68,68,0.75)' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.25)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)' }}>
                       <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
