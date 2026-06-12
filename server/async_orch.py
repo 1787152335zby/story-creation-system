@@ -100,8 +100,8 @@ def _validate_chunk_quality(chunk_output: str, episode_count: int, phase: str = 
             scene_count = len(re.findall(r'[夜日晨昏]\s+[内外]\s+\S+', chunk_output))
         if scene_count < 1:
             issues.append(f"场数不足：{scene_count}场（要求≥1场）")
-        elif scene_count > 2:
-            issues.append(f"场数过多：{scene_count}场（抖音短剧每集1-2场，≤2场）")
+        elif scene_count > 3:
+            issues.append(f"场数过多：{scene_count}场（抖音短剧每集理想1-2场，最多3场，≤3场）")
 
     # 3. 重复句式校验：同一句连续出现或整集中非连续出现≥3次视为注水
     lines_in = [l.strip() for l in chunk_output.split('\n') if l.strip()]
@@ -1906,7 +1906,7 @@ class AsyncOrchestrator:
                     f"换场: 空一行后写新场头\n"
                     f"结尾: **（全文完）**\n\n"
                     f"禁止: ##标记、###标记、出场角色行、对白独占三行、对白超15字\n"
-                    f"⚠️ 每集只写1-2场（抖音短剧2分钟一集，场多了观众记不住场景）。1场一镜到底最好，2场只在必须换地点时用。3场以上视为废稿。\n"
+                    f"⚠️ 每集理想1-2场（抖音短剧2分钟一集，场多了观众记不住场景）。1场一镜到底最好，2场只在必须换地点时用。最多3场，4场以上视为废稿。\n"
                     f"{voice_rules_p}"
                     f"示例:\n"
                     f"{ep_name}\n\n"

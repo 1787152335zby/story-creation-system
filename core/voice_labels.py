@@ -33,10 +33,11 @@ def format_voice_injection(labels: list[dict]) -> str:
     """将声线标签格式化为prompt注入文本"""
     if not labels:
         return ""
-    lines = ["\n## 角色声音约束（以下标签来自大纲设定，必须严格遵守）"]
+    lines = ["\n## 角色声音约束（体现为语气和逻辑，不是机械重复某个词）"]
     for entry in labels:
         lines.append(f"- {entry['name']}：{entry['tag']}")
-    lines.append("每句对白写完后自查：删掉角色名能不能看出是谁说的。看不出就重写。")
+    lines.append("若标签含口头词（如「每句带因为」），只在自然通顺处使用，禁止硬塞造病句（如『因为对』『因为谁？』）。")
+    lines.append("每句对白写完后自查：是不是像真人说的话？删掉角色名能不能看出是谁说的？看不出或不通顺就重写。")
     return "\n".join(lines)
 
 
@@ -70,9 +71,12 @@ def build_hard_constraint_card(outline_text: str) -> str:
 
     if labels:
         lines.append("")
-        lines.append("**每人说话方式（必须逐句匹配，不得例外）：**")
+        lines.append("**每人说话方式（体现为语气和逻辑，不是机械重复某个词）：**")
         for l in labels:
             lines.append(f"- {l['name']}：{l['tag']}")
+        lines.append("⚠️ 声音标签若含某个口头词（如「每句带因为」「句末带逗号」），只在自然通顺时使用——"
+                     "禁止在反问、附和、疑问句前硬塞该词造出病句（如『因为对』『因为谁？』）。"
+                     "判断标准：每句都要像真人说的话，通顺自然，同时删掉角色名仍能认出是谁。")
 
     lines.append("")
     lines.append("**钩子：** 整集最后一行之前的一行，必须是纯画面动作（括号包裹），不能是对白。")
