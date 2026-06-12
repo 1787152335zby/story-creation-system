@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Sparkles, Loader2, RefreshCw, Upload, Download, X, Video } from 'lucide-react'
-import { fetchProjects, fetchVideoClips, getMediaUrl, freeVideoGen, fetchVideoResolutions, fetchActiveConfig, fetchGenerationHistory, fetchProjectImages, fetchConfirmedImages, fetchProjectVisualAssets } from '../lib/api'
+import { ArrowLeft, Sparkles, Loader2, RefreshCw, Upload, Download, X, Video, FolderOpen } from 'lucide-react'
+import { fetchProjects, fetchVideoClips, getMediaUrl, freeVideoGen, fetchVideoResolutions, fetchActiveConfig, fetchGenerationHistory, fetchProjectImages, fetchConfirmedImages, fetchProjectVisualAssets, openGeneratedFolder } from '../lib/api'
 import ModelSelector from '../components/ModelSelector'
 import VideoProjectPanel from '../components/VideoProjectPanel'
 import ImagePreview from '../components/ImagePreview'
@@ -240,6 +240,11 @@ export default function VideoGenPage() {
             </div>
           </button>
         </div>
+
+        <button onClick={() => { openGeneratedFolder(); toast('正在打开文件夹', 'info') }}
+          className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/55 transition-colors mb-4">
+          <FolderOpen className="w-3 h-3" /> 打开生成文件夹
+        </button>
 
         {mode === 'free' ? (
           <>

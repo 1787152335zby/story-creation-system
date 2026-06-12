@@ -14,6 +14,8 @@ export interface WSMessage {
   chunk_name?: string
   chunk_index?: number
   total_chunks?: number
+  running?: boolean
+  completed_phases?: Array<{phase_index: number; phase_name: string; content: string; truncated: boolean}>
 }
 
 export interface ChunkInfo {
@@ -21,6 +23,14 @@ export interface ChunkInfo {
   index: number
   total: number
   filePath?: string
+}
+
+export interface AutoDurationSuggestion {
+  count: number
+  episodes: string[]
+  reasoning: string
+  per_ep: string
+  type_name: string
 }
 
 export interface EpisodeInfo {
@@ -51,6 +61,7 @@ export function useWebSocket() {
   const [currentEpisode, setCurrentEpisode] = useState<EpisodeInfo | null>(null)
   const [confirmedPhaseIndex, setConfirmedPhaseIndex] = useState<number | null>(null)
   const [pausedPhaseIndex, setPausedPhaseIndex] = useState<number | null>(null)
+  const [autoDuration, setAutoDuration] = useState<AutoDurationSuggestion | null>(null)
 
   const cleanup = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -58,16 +69,20 @@ export function useWebSocket() {
       reconnectTimerRef.current = null
     }
     if (wsRef.current) {
-      wsRef.current.onclose = null
-      wsRef.current.onmessage = null
-      wsRef.current.onerror = null
-      wsRef.current.onopen = null
-      wsRef.current.close()
+      const ws = wsRef.current
       wsRef.current = null
+      ws.onclose = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onopen = null
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close()
+      }
     }
   }, [])
 
   const connect = useCallback((projectName: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
     cleanup()
     isGeneratingRef.current = true
     setStreamContent('')
@@ -92,6 +107,34 @@ export function useWebSocket() {
     ws.onmessage = (event) => {
       const msg: WSMessage = JSON.parse(event.data)
       switch (msg.type) {
+        case 'reconnect_sync':
+          if (msg.running) {
+            setCurrentPhase(msg.phase_index ?? 0)
+            isGeneratingRef.current = true
+            setIsComplete(false)
+            setStreamDone(false)
+            if (msg.completed_phases) {
+              const cps = msg.completed_phases as Array<{phase_index: number; phase_name: string; content: string; truncated: boolean}>
+              for (const cp of cps) {
+                setPhases(prev => {
+                  const next = [...prev]
+                  if (cp.phase_index !== undefined) {
+                    next[cp.phase_index] = { name: cp.phase_name || '', status: 'done' }
+                  }
+                  return next
+                })
+                if (cp.content) {
+                  setStreamContent(cp.content)
+                  setStreamDone(true)
+                }
+              }
+              if (cps.length > 0) {
+                const last = cps[cps.length - 1]
+                setCurrentPhase(last.phase_index)
+              }
+            }
+          }
+          break
         case 'progress':
           setProgress({ current: msg.current || 0, total: msg.total || 6 })
           break
@@ -201,7 +244,32 @@ export function useWebSocket() {
           isGeneratingRef.current = false
           break
         case 'reconnect_status':
-          // 后台任务仍在运行，不做特殊处理
+          // 后台任务仍在运行，不做特殊处理（保留兼容旧版消息）
+          break
+        case 'reconnect_sync':
+          if (msg.phase_index >= 0) setCurrentPhase(msg.phase_index)
+          break
+        case 'phase_chunks':
+          if (msg.chunks && typeof msg.chunks === 'object') {
+            setChunksCompleted(prev => {
+              const next = { ...prev }
+              for (const [k, v] of Object.entries(msg.chunks)) {
+                const idx = parseInt(k)
+                if (!next[idx] || next[idx].length === 0) {
+                  next[idx] = v as ChunkInfo[]
+                }
+              }
+              return next
+            })
+          }
+          break
+        case 'auto_duration_suggest':
+          if (msg.suggestion) {
+            setAutoDuration(msg.suggestion as AutoDurationSuggestion)
+          }
+          break
+        case 'auto_duration_confirmed':
+          setAutoDuration(null)
           break
       }
     }
@@ -299,11 +367,17 @@ export function useWebSocket() {
     setConfirmedPhaseIndex(null)
   }, [])
 
+  const confirmAutoDuration = useCallback((count: number, duration: string) => {
+    send({ action: 'duration_confirm', count, duration })
+    setAutoDuration(null)
+  }, [send])
+
   return {
     connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream,
     episodeConfirm, episodeApprove, episodeRevise,
     connected, streamContent, currentPhase, phases,
     progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, error, chunksCompleted,
     awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase, pausedPhaseIndex,
+    autoDuration, confirmAutoDuration,
   }
 }

@@ -39,7 +39,7 @@ def check_g1_outline(project_dir: Path) -> list[str]:
 
 
 def check_g2_plot(project_dir: Path) -> list[str]:
-    """G2: 剧情生成后 — 检查节拍、支线"""
+    """G2: 剧情生成后 — 检查节拍、支线、对白密度、视觉锚点"""
     warnings = []
     plot_dir = project_dir / "02_完整剧情"
     if not plot_dir.exists():
@@ -57,11 +57,35 @@ def check_g2_plot(project_dir: Path) -> list[str]:
         if beat_count < 3:
             warnings.append(f"G2: {f.name} 节拍数不足（{beat_count} < 3）")
 
+        # 对白密度检测：每集对白字符数
+        dialogue_chars = sum(len(l.strip()) for l in text.split("\n")
+                            if "\uff1a" in l and not l.strip().startswith("#") and not l.strip().startswith("出场"))
+        if dialogue_chars > 300:
+            warnings.append(f"G2 对白密度: {f.name} 对白约{dialogue_chars}字（阈值300），建议精简")
+
+        # 视觉锚点检测：纯画面段落
+        paras = text.split("\n\n")
+        visual_paras = 0
+        for p in paras:
+            lines = p.strip().split("\n")
+            pure_visual = True
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("#") or line == "---":
+                    continue
+                if "\uff1a" in line or re.match(r'^[\"\u201c]', line):
+                    pure_visual = False
+                    break
+            if pure_visual and len(lines) >= 2:
+                visual_paras += 1
+        if visual_paras < 3:
+            warnings.append(f"G2 视觉锚点: {f.name} 仅有{visual_paras}处纯画面段落（需≥3），对白可能偏多")
+
     return warnings
 
 
 def check_g3_script(project_dir: Path) -> list[str]:
-    """G3: 剧本生成后 — 检查对白差异化"""
+    """G3: 剧本生成后 — 检查对白差异化、对白密度、视觉锚点"""
     warnings = []
     script_dir = project_dir / "03_完整剧本"
     if not script_dir.exists():
@@ -75,10 +99,29 @@ def check_g3_script(project_dir: Path) -> list[str]:
 
     for f in files:
         text = f.read_text(encoding="utf-8")
-        dialog_count = text.count("：")
-        action_count = text.count("（") + text.count("(")
+        dialog_count = text.count("\uff1a")
+        action_count = text.count("\uff08") + text.count("(")
         if dialog_count > 0 and action_count < dialog_count * 0.3:
-            warnings.append(f"G3: {f.name} 动作描述偏少（对白 {dialog_count} 句，建议增加场景调度）")
+            warnings.append(f"G3: {f.name} 动作描述偏少（对白 {dialog_count} 句）")
+
+        # 对白密度检测
+        dialogue_lines = [l.strip() for l in text.split("\n")
+                          if "\uff1a" in l and not l.strip().startswith("#") and not l.strip().startswith("出场")]
+        if len(dialogue_lines) > 16:
+            warnings.append(f"G3 对白密度: {f.name} 有{len(dialogue_lines)}句对白（阈值16句），接近或超过阈值")
+
+    # 逐集检测
+    for ep_dir in sorted(script_dir.iterdir()):
+        if not ep_dir.is_dir():
+            continue
+        ep_files = list(ep_dir.glob("完整剧本.md"))
+        if not ep_files:
+            continue
+        ep_text = ep_files[0].read_text(encoding="utf-8")
+        ep_dialogue = [l.strip() for l in ep_text.split("\n")
+                       if "\uff1a" in l and not l.strip().startswith("#") and not l.strip().startswith("出场")]
+        if len(ep_dialogue) > 20:
+            warnings.append(f"G3 对白密度: {ep_dir.name} 有{len(ep_dialogue)}句对白（阈值20），可能过度依赖对话")
 
     return warnings
 

@@ -70,7 +70,7 @@ export default function AllProjectsPage() {
   const [hoveredStar, setHoveredStar] = useState<string | null>(null)
   const [bursts, setBursts] = useState<BurstParticle[]>([])
   const [selectedProject, setSelectedProject] = useState<ProjectInfo | null>(null)
-  const [viewMode, setViewMode] = useState<'universe' | 'cards'>('universe')
+  const [viewMode, setViewMode] = useState<'universe' | 'cards'>('cards')
   const [showStagger, setShowStagger] = useState(false)
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
@@ -146,12 +146,7 @@ export default function AllProjectsPage() {
   }, [])
 
   useEffect(() => {
-    fetchProjects().then(setProjects).catch(() => {})
-    setTimeout(() => setVisible(true), 80)
-    entryRef.current = 0
-    const start = performance.now()
-    const animateEntry = (now: number) => { entryRef.current = Math.min((now - start) / 5000, 1); setEntryTick(n => n + 1); if (entryRef.current < 1) entryIdRef.current = requestAnimationFrame(animateEntry) }
-    entryIdRef.current = requestAnimationFrame(animateEntry)
+    fetchProjects().then(data => { setProjects(data); setTimeout(() => { setVisible(true); entryRef.current = 0; const start = performance.now(); const animateEntry = (now: number) => { entryRef.current = Math.min((now - start) / 5000, 1); setEntryTick(n => n + 1); if (entryRef.current < 1) entryIdRef.current = requestAnimationFrame(animateEntry) }; entryIdRef.current = requestAnimationFrame(animateEntry) }, 50) }).catch(() => {})
     return () => { cancelAnimationFrame(entryIdRef.current); clearInterval(burstTimerRef.current) }
   }, [])
 
@@ -1005,7 +1000,7 @@ export default function AllProjectsPage() {
                         </label>
                       ))}
                     </div>
-                    <a href={`/api/projects/${encodeURIComponent(exportTarget)}/export-batch?phases=${encodeURIComponent([...selectedPhases].join(','))}`} target="_blank" rel="noopener noreferrer"
+                    <a href={`/api/projects/${encodeURIComponent(exportTarget)}/export-batch?phases=${encodeURIComponent([...selectedPhases].join(','))}`}
                       className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-medium transition-all ${selectedPhases.size === 0 ? 'pointer-events-none opacity-30' : ''}`}
                       style={{ background: 'rgba(59,130,246,0.20)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
                       onClick={() => { setTimeout(() => setExportTarget(null), 500) }}>
@@ -1022,7 +1017,7 @@ export default function AllProjectsPage() {
                             <span className="text-[10px] text-white/40 font-medium">{ph.label}</span>
                             <span className="text-[9px] text-white/15">({(ph.files || []).length})</span>
                             {ph.has_content && (
-                              <a target="_blank" rel="noopener noreferrer"
+                              <a
                                 href={`/api/projects/${encodeURIComponent(exportTarget)}/export-phase?phase=${encodeURIComponent(ph.dir)}`}
                                 className="ml-auto text-[9px] px-2 py-0.5 rounded text-blue-300/70 hover:bg-blue-500/[0.10] transition-all border border-blue-400/[0.12]">
                                 📥 全部下载
@@ -1032,7 +1027,7 @@ export default function AllProjectsPage() {
                           <div className="space-y-0.5 pl-3 border-l border-white/[0.04]">
                             {(ph.files || []).length === 0 ? <span className="text-[10px] text-white/15 pl-2">无文件</span> :
                               (ph.files || []).map(f => (
-                                <a key={f.name} target="_blank" rel="noopener noreferrer"
+                                <a key={f.name}
                                   href={`/api/projects/${encodeURIComponent(exportTarget)}/export-single?phase=${encodeURIComponent(ph.dir)}&file=${encodeURIComponent(f.name)}`}
                                   className="flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-blue-300/70 hover:bg-blue-500/[0.08] hover:text-blue-300 transition-all">
                                   <Download className="w-2.5 h-2.5 flex-shrink-0" /><span className="truncate">{f.label}</span>

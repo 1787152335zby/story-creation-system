@@ -18,6 +18,7 @@ class StyleConfigRequest(BaseModel):
     visual_reference: str = ""
     action_reference: str = ""
     mood: str = ""
+    story_idea: str = ""
 
 
 class CreateProjectRequest(BaseModel):
@@ -60,6 +61,7 @@ class SettingsResponse(BaseModel):
     aggregated_llm_model: str = ""
     aggregated_image_model: str = ""
     aggregated_video_model: str = ""
+    writer_mode: str = "full"
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -83,6 +85,7 @@ class SettingsUpdateRequest(BaseModel):
     aggregated_llm_model: Optional[str] = None
     aggregated_image_model: Optional[str] = None
     aggregated_video_model: Optional[str] = None
+    writer_mode: Optional[str] = None
 
 
 class TestLLMRequest(BaseModel):

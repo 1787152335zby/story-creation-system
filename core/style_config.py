@@ -104,6 +104,7 @@ class StyleConfig:
         self.custom_requirements: str = ""
         self.visual_reference: str = ""
         self.action_reference: str = ""
+        self.writer_mode: str = "full"
 
     def to_dict(self) -> Dict:
         return {
@@ -122,6 +123,7 @@ class StyleConfig:
             "custom_requirements": self.custom_requirements,
             "visual_reference": self.visual_reference,
             "action_reference": self.action_reference,
+            "writer_mode": self.writer_mode,
         }
 
     def to_yaml_string(self) -> str:
@@ -170,6 +172,7 @@ class StyleConfig:
         config.custom_requirements = data.get("custom_requirements", "")
         config.visual_reference = data.get("visual_reference", "")
         config.action_reference = data.get("action_reference", "")
+        config.writer_mode = data.get("writer_mode", "full")
         return config
 
     def resolve_art_style(self) -> str:

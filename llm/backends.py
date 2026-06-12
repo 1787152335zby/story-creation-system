@@ -11,7 +11,7 @@ class LLMBackend:
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
         raise NotImplementedError
 
-    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> Generator[str, None, None]:
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768) -> Generator[str, None, None]:
         raise NotImplementedError
 
     def _get_client(self):
@@ -30,7 +30,7 @@ class OpenAIBackend(LLMBackend):
             timeout=120,
         )
 
-    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768) -> str:
         try:
             response = self._get_client().chat.completions.create(
                 model=self.model,
@@ -47,7 +47,7 @@ class OpenAIBackend(LLMBackend):
         except Exception as e:
             raise RuntimeError(f"OpenAI/DeepSeek 调用失败: {e}")
 
-    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768):
         response = self._get_client().chat.completions.create(
             model=self.model,
             messages=[
@@ -74,7 +74,7 @@ class ClaudeBackend(LLMBackend):
             kwargs["base_url"] = self._base_url
         return Anthropic(**kwargs)
 
-    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768) -> str:
         try:
             response = self._get_client().messages.create(
                 model=self.model,
@@ -87,7 +87,7 @@ class ClaudeBackend(LLMBackend):
         except Exception as e:
             raise RuntimeError(f"Claude 调用失败: {e}")
 
-    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768):
         with self._get_client().messages.stream(
             model=self.model,
             system=system_prompt,
@@ -111,7 +111,7 @@ class DeepSeekBackend(LLMBackend):
             timeout=120,
         )
 
-    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768) -> str:
         try:
             response = self._get_client().chat.completions.create(
                 model=self.model,
@@ -128,7 +128,7 @@ class DeepSeekBackend(LLMBackend):
         except Exception as e:
             raise RuntimeError(f"DeepSeek 调用失败: {e}")
 
-    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384):
+    def chat_stream(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 32768):
         response = self._get_client().chat.completions.create(
             model=self.model,
             messages=[

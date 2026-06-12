@@ -12,6 +12,7 @@ class ChunkPlan:
     context_window: int
     summarize: bool
     bible_mode: bool = False
+    batch_size: int = 1
 
 
 @dataclass
@@ -101,17 +102,58 @@ class ChunkIter:
         return blocks
 
     def set_auto_blocks(self, count: int, outline: str = ""):
-        self.plan.chunk_count = count
-        self.plan.chunk_names = [f"第{i+1}集" for i in range(count)]
-        if outline and len(outline) > 100 and count > 1:
-            per_chunk = len(outline) // count
-            self.blocks = []
-            for i in range(count):
-                start = i * per_chunk
-                end = (i + 1) * per_chunk if i < count - 1 else len(outline)
-                self.blocks.append({"index": i, "name": self.plan.chunk_names[i], "content": outline[start:end]})
+        batch = max(1, self.plan.batch_size)
+        if batch > 1 and count > batch:
+            num_blocks = (count + batch - 1) // batch
+            self.plan.chunk_count = num_blocks
+            names = []
+            for i in range(num_blocks):
+                s = i * batch + 1
+                e = min((i + 1) * batch, count)
+                names.append(f"第{s}集-第{e}集")
+            self.plan.chunk_names = names
         else:
-            self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": ""} for i in range(count)]
+            self.plan.chunk_count = count
+            self.plan.chunk_names = [f"第{i+1}集" for i in range(count)]
+
+        if outline and len(outline) > 100 and count > 1:
+            # 在大纲中按 **第N集** / ### 第N集 等标记精确切分每集大纲
+            EP_RX = r'(?:^|\n)(?:\*{1,3}\s*\*{0,2}|#{1,3}\s*)第\d+[集章节]'
+            body = outline
+            marker_match = re.search(EP_RX, outline)
+            if marker_match:
+                body = outline[marker_match.start():]
+
+            # 按 "第N集" / "第N章" 标记切分
+            episode_boundaries = list(re.finditer(EP_RX, body))
+            if len(episode_boundaries) >= 2:
+                ep_sections = []
+                for i, m in enumerate(episode_boundaries):
+                    start = m.start()
+                    end = episode_boundaries[i + 1].start() if i + 1 < len(episode_boundaries) else len(body)
+                    ep_sections.append(body[start:end])
+                # 兜底上下文: 大纲前文(人物+梗概+基调)，供不足集数的块使用
+                fallback = outline[:marker_match.start()].strip() if marker_match else outline[:1000]
+                self.blocks = []
+                for i in range(self.plan.chunk_count):
+                    if i < len(ep_sections):
+                        self.blocks.append({
+                            "index": i,
+                            "name": self.plan.chunk_names[i],
+                            "content": ep_sections[i],
+                        })
+                    else:
+                        self.blocks.append({
+                            "index": i,
+                            "name": self.plan.chunk_names[i],
+                            "content": fallback,
+                        })
+            else:
+                self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": outline} for i in range(self.plan.chunk_count)]
+        elif outline and len(outline) <= 100:
+            self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": outline} for i in range(self.plan.chunk_count)]
+        else:
+            self.blocks = [{"index": i, "name": self.plan.chunk_names[i], "content": ""} for i in range(self.plan.chunk_count)]
 
     def __iter__(self):
         indices = list(range(len(self.blocks)))

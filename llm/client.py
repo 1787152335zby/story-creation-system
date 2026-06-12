@@ -1,11 +1,11 @@
 import os
+import json
 from typing import Optional
 from .backends import OpenAIBackend, ClaudeBackend, DeepSeekBackend, LLMBackend
 
 
 def _get_active_llm_config() -> dict | None:
     """Read aggregated configs and find active LLM config."""
-    import json
     from pathlib import Path
     path = Path(__file__).resolve().parent.parent / "aggregated_configs.json"
     if not path.exists():
@@ -36,6 +36,66 @@ PROVIDER_MODEL_MAP = {
     "openai": "gpt-4o",
     "claude": "claude-sonnet-4-20250514",
 }
+
+_auto_model_cache: dict = {}
+
+
+def resolve_model(base_url: str, api_key: str, preferred: str = "", provider: str = "") -> str:
+    cache_key = f"{provider}|{base_url}|{api_key[:12]}"
+    if cache_key in _auto_model_cache:
+        return _auto_model_cache[cache_key]
+
+    from openai import OpenAI
+
+    # 1. 拉取可用模型列表
+    models: list[str] = []
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=10)
+        resp = client.models.list()
+        models = [m.id for m in resp.data]
+    except Exception:
+        pass
+
+    if not models:
+        fallback = preferred or PROVIDER_MODEL_MAP.get(provider, "deepseek-chat")
+        _auto_model_cache[cache_key] = fallback
+        return fallback
+
+    # 2. 排序：优先用户指定的 > 含 "chat" 的 > API 返回的其他模型
+    chat = [m for m in models if "chat" in m.lower()]
+    other = [m for m in models if "chat" not in m.lower()]
+
+    candidates: list[str] = []
+    if preferred:
+        candidates.append(preferred)
+    for m in chat:
+        if m not in candidates:
+            candidates.append(m)
+    for m in other:
+        if m not in candidates:
+            candidates.append(m)
+
+    # 3. 快速测试：找第一个能输出 message.content 的模型
+    test_messages = [{"role": "user", "content": "."}]
+    for m in candidates:
+        try:
+            r = client.chat.completions.create(model=m, messages=test_messages, max_tokens=5)
+            content = r.choices[0].message.content or ""
+            if content.strip():
+                _auto_model_cache[cache_key] = m
+                return m
+        except Exception:
+            continue
+
+    selected = candidates[0] if candidates else "deepseek-chat"
+    _auto_model_cache[cache_key] = selected
+    return selected
+
+
+def resolve_and_update_env(base_url: str, api_key: str, provider: str, model_env: str, preferred: str = "") -> str:
+    model = resolve_model(base_url, api_key, preferred, provider)
+    os.environ[model_env] = model
+    return model
 
 
 class LLMClient:
@@ -75,9 +135,15 @@ class LLMClient:
             "claude": ("CLAUDE_API_KEY", "CLAUDE_MODEL", "claude-sonnet-4-20250514", ""),
         }
         key_env, model_env, default_model, default_url = env_key_map.get(name, ("", "", "gpt-4o", ""))
-        model = os.getenv(model_env, default_model)
         api_key = os.getenv(key_env, "")
-        base_url = os.getenv(f"{name.upper()}_BASE_URL", default_url) or None
+        base_url = os.getenv(f"{name.upper()}_BASE_URL", default_url) or ""
+
+        # 自动从 API 拉取可用模型列表并选择最佳模型
+        preferred = os.getenv(model_env, "")
+        if base_url and api_key:
+            model = resolve_and_update_env(base_url, api_key, name, model_env, preferred)
+        else:
+            model = preferred or default_model
 
         backends = {
             "openai": OpenAIBackend,

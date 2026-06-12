@@ -5,39 +5,55 @@ from core.novel_bible import NovelBible, CharacterEntry, FactionEntry, TimelineE
 class BibleUpdater:
     @staticmethod
     def build_diff_prompt(bible: NovelBible, chapter_num: int, content: str) -> str:
+        existing_hooks = "\n".join(
+            f"  - {h.description} (第{h.planted_at}章埋, 状态:{h.status})"
+            for h in bible.hooks
+        )
+        existing_chars = "\n".join(
+            f"  {name}: 状态={entry.status}, 最后出场第{entry.last_seen_chapter}章, 位置={entry.last_seen_location}"
+            for name, entry in bible.characters.items()
+        )
         return (
             f"以下是最新写的第{chapter_num}章内容。请分析变更并输出YAML格式的更新指令。\n\n"
-            f"内容：\n{content[:3000]}\n\n"
-            f"只输出有变化的部分，没有变化的部分不要输出。\n\n"
-            f"## 格式\n"
+            f"内容：\n{content[:4000]}\n\n"
+            f"## 现有人物状态\n{existing_chars if existing_chars else '(无)'}\n\n"
+            f"## 现有未收伏笔\n{existing_hooks if existing_hooks else '(无)'}\n\n"
+            f"## 输出格式（只输出有变化的部分）\n"
             f"updates:\n"
             f"  characters:\n"
             f"    角色名:\n"
-            f"      status: 变化后的状态\n"
-            f"      cultivation: 修为变化\n"
+            f"      status: 变化后的状态 (存活/死亡/失踪/受伤)\n"
             f"      last_seen_chapter: {chapter_num}\n"
-            f"      last_seen_location: 地点\n"
+            f"      last_seen_location: 具体地点\n"
+            f"      arc: 角色弧光当前状态的简短描述\n"
             f"      relations:\n"
-            f"        - 与XXX(关系描述)\n"
+            f"        - 与XXX的关系(关系性质及变化)\n"
+            f"      key_items:\n"
+            f"        - 新增或变化的关键物品\n"
             f"      pending_hooks:\n"
-            f"        - 新埋伏笔描述\n"
+            f"        - 该角色身上新增的待收伏笔（每条15字内）\n"
             f"  factions:\n"
             f"    势力名:\n"
-            f"      current_goal: 新目标\n"
+            f"      members:\n"
+            f"        - 角色名（新增或移除）\n"
+            f"      current_goal: 当前目标\n"
             f"      relations:\n"
-            f"        - 与XXX(关系变化)\n"
+            f"        - 与XXX的关系变化\n"
             f"  hooks:\n"
-            f"    - description: 新伏笔描述\n"
+            f"    - description: 新伏笔描述（20字内）\n"
             f"      planted_at: {chapter_num}\n"
             f"      status: 未收\n"
+            f"      expected_resolve: 预计在哪类场景回收（如\"身份揭晓时\"\"最终对决前\"）\n"
             f"  resolved_hooks:\n"
-            f"    - description: 已收伏笔描述（必须与之前埋下的完全一致）\n"
+            f"    - description: 已收伏笔描述（必须与埋下时一致）\n"
             f"      resolved_in: {chapter_num}\n"
             f"  timeline:\n"
             f"    - chapter: {chapter_num}\n"
-            f"      type: 转折|高潮|铺垫|日常\n"
-            f"      summary: 一句话描述（20字以内）\n"
-            f"  chapter_summary: 本章20字以内摘要"
+            f"      type: 转折|高潮|铺垫|日常|揭示|战斗\n"
+            f"      summary: 本章关键事件一句话（25字内）\n"
+            f"  chapter_summary: 本章25字以内摘要\n"
+            f"  world_rules:\n"
+            f"    - 新增或变化的世界规则描述"
         )
 
     @staticmethod

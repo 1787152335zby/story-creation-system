@@ -21,9 +21,9 @@ class AgentBase:
     def call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_tokens: int = 16384) -> str:
         return self.llm.chat(system_prompt, user_prompt, temperature, max_tokens)
 
-    def call_llm_with_continuation(self, system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
+    def call_llm_with_continuation(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, max_rounds: int = 8) -> str:
         full_output = ""
-        for attempt in range(8):
+        for attempt in range(max_rounds):
             current_system = system_prompt
             if attempt > 0:
                 current_system = system_prompt + (

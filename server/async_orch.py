@@ -12,7 +12,10 @@ from agents.orchestrator import _split_sort_key
 from core.content_validator import validate_content
 from core.continuity import extract_continuity, save_continuity, load_last_continuity, generate_continuity_injection
 from core.qc_gates import run_qc_check
+from core.quality_checker import run_ai_quality_check, extract_promise_list, qc_result_to_warnings
+from core.story_bible import load_bible, save_bible, format_bible_injection, should_update_bible, build_bible_update, BIBLE_UPDATE_INTERVAL
 from core.agent_factory import create_agent
+from core.auto_duration import get_type_default, analyze_duration
 from core.visual_bible import VisualBibleExtractor
 
 from .ws_manager import ConnectionManager
@@ -21,13 +24,18 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_chunk_heading(chunk_output: str, display_name: str) -> str:
-    """确保分镜/剧本的每集输出以 # 第N集 开头，去除前导散文内容"""
+    """确保分镜/剧本的每集输出以 # 第N集 开头，去除前导散文内容。
+    不截断区间标题（如 第1集-第16集），保留原样。"""
     import re
     text = chunk_output.strip()
-    # 在全文中找 # 第N集 标题，找到了就从那里截取
-    episode_match = re.search(r'^(#{1,4}\s*第\d+[集章部篇])', text, re.MULTILINE)
+    # 找第一个单集标题（第N集，后面不能是 -第M集）
+    episode_match = re.search(r'^(#{1,4}\s*第\d+[集章部篇])(?!\s*[-–—]\s*第\d+)', text, re.MULTILINE)
     if episode_match:
         return text[episode_match.start():]
+    # 如果是区间标题（第X集-第Y集），也接受
+    range_match = re.search(r'^(#{1,4}\s*第\d+[集章部篇]\s*[-–—]\s*第\d+[集章部篇])', text, re.MULTILINE)
+    if range_match:
+        return text[range_match.start():]
     # 找不到集标题，去除前导散文（直到第一个有效内容标记）
     for token in ["###", "##", "---", "镜头", "【全片完】"]:
         idx = text.find(token)
@@ -37,6 +45,217 @@ def _normalize_chunk_heading(chunk_output: str, display_name: str) -> str:
     if not text.startswith("#"):
         text = f"# {display_name}\n\n{text}"
     return text
+
+
+def _build_creative_anchor(project: ProjectManager) -> str:
+    """从大纲中提取世界观/类型/基调，作为每个 batch 的创作锚点。
+    防止 LLM 在长剧集中忘记原始的设定和风格。"""
+    outline = project.read_output("01_故事大纲/故事大纲.md") or ""
+    if not outline:
+        return ""
+
+    # 取第1集标记之前的所有内容（世界观+人物+基调）
+    prelude = re.split(r'\n\s*\*{1,3}\s*\*{0,2}第\d+集', outline, maxsplit=1)[0]
+
+    # 提取关键段落：故事类型、核心主题、故事梗概
+    lines: list[str] = []
+    for block in prelude.split("\n\n"):
+        stripped = block.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        for keyword in ["故事类型", "核心主题", "故事梗概", "参考作品", "角色", "人物", "重要道具", "**名称**", "*   **名称**"]:
+            if keyword in stripped:
+                lines.append(stripped)
+                break
+
+    if not lines:
+        # fallback: 取前 1500 字
+        lines = [prelude[:1500]]
+
+    anchor = "\n\n".join(lines)
+    return (
+        "\n\n【创作锚点——本剧核心设定不可遗忘】\n"
+        f"{anchor}\n\n"
+        "以上是贯穿全剧的世界观和风格基调。你现在编写的每一集都必须忠实于这个设定。\n"
+        "严禁偏离原始类型和氛围。如果前文已偏离，请在本 batch 中逐步拉回正轨。"
+    )
+
+
+def _validate_chunk_quality(chunk_output: str, episode_count: int, phase: str = "") -> dict:
+    """自动审核模式下的出厂质检。
+    返回 {"pass": True} 或 {"pass": False, "reasons": [...]}"""
+    issues = []
+    is_script = "剧本" in phase or "03_" in phase
+
+    # 1. 字数校验：剧情≥800字（给剧本生成器足够信息），剧本≥400字
+    wc = len(chunk_output)
+    min_words = 400 if is_script else 800
+    if wc < min_words:
+        issues.append(f"字数不足：{wc}字（要求≥{min_words}字）")
+
+    # 2. 场数校验：只对剧本检查（剧情不需要分场标注）
+    if is_script:
+        scene_count = len(re.findall(r'场\d+-\d+', chunk_output))
+        if scene_count == 0:
+            scene_count = len(re.findall(r'[夜日晨昏]\s+[内外]\s+\S+', chunk_output))
+        if scene_count < 1:
+            issues.append(f"场数不足：{scene_count}场（要求≥1场）")
+        elif scene_count > 2:
+            issues.append(f"场数过多：{scene_count}场（抖音短剧每集1-2场，≤2场）")
+
+    # 3. 重复句式校验：同一句连续出现或整集中非连续出现≥3次视为注水
+    lines_in = [l.strip() for l in chunk_output.split('\n') if l.strip()]
+    for i in range(len(lines_in) - 2):
+        if len(lines_in[i]) > 5 and lines_in[i] == lines_in[i+1] == lines_in[i+2]:
+            if not lines_in[i].startswith('#'):
+                issues.append(f"重复句式：\"{lines_in[i][:40]}\" 连续出现3次")
+                break
+    if not issues:
+        # 非连续重复检测：相同句尾（最后 15 字符）出现 3 次以上 = LLM 在兜圈
+        text_lines = [l for l in lines_in if len(l) >= 15]
+        if len(text_lines) >= 10:
+            from collections import Counter
+            endings = Counter()
+            for l in text_lines:
+                endings[l[-15:]] += 1
+            for ending, cnt in endings.items():
+                if cnt >= 3:
+                    issues.append(f"结构重复：\"...{ending[:30]}\" 出现{cnt}次（LLM兜圈）")
+                    break
+
+    # 4. 纯空集校验：全是格式无内容
+    text_only = re.sub(r'[#\-\*\s\n△]', '', chunk_output)
+    if len(text_only) < 200:
+        issues.append(f"有效内容不足：仅{len(text_only)}字符")
+
+    # 5. token-loop 幻觉校验：
+    # 剧情严格（——≤20直毙），剧本宽——高破折号可能是黑暗诗学风格
+    # 只在破折号过高+内容重复同时出现时才判定幻觉
+    dash_count = chunk_output.count("——")
+    dash_limit = 50 if is_script else 20
+    if is_script and dash_count > dash_limit:
+        lines_clean = [l.strip() for l in chunk_output.split('\n') if '——' in l and l.strip()]
+        repeat_burst = False
+        if len(lines_clean) >= 6:
+            stripped = [re.sub(r'[——△\s]', '', l) for l in lines_clean]
+            for i in range(2, len(stripped)):
+                if stripped[i] == stripped[i-1] == stripped[i-2]:
+                    repeat_burst = True
+                    break
+            if not repeat_burst:
+                pats = [re.split(r'——', l) for l in lines_clean]
+                pat_lens = [tuple(len(p.strip()) for p in pt) for pt in pats if pt]
+                for i in range(2, len(pat_lens)):
+                    if pat_lens[i] == pat_lens[i-1] == pat_lens[i-2] and max(pat_lens[i]) > 0:
+                        repeat_burst = True
+                        break
+        if repeat_burst:
+            issues.append(f"幻觉：{dash_count}个\"——\"+重复结构（破折号灌水兜圈）")
+        elif dash_count > 80:
+            issues.append(f"幻觉：{dash_count}个\"——\"（严重超标，正常≤{dash_limit}）")
+    elif not is_script and dash_count > dash_limit:
+        issues.append(f"token-loop幻觉：{dash_count}个\"——\"（正常≤{dash_limit}）")
+    elif wc > 10000:
+        issues.append(f"集字数异常膨胀：{wc}字（正常3000-7000）")
+
+    # 6. 尾句钩子检测：尾句是描述性收束/情绪总结/自然结束则不合格
+    if is_script:
+        lines = [l.strip() for l in chunk_output.split('\n') if l.strip()]
+        content_end = None
+        for i in range(len(lines) - 1, -1, -1):
+            if '全文完' in lines[i]:
+                content_end = i
+                break
+        if content_end is None:
+            issues.append(f"缺少结尾标记\"**（全文完）**\"")
+        if content_end is not None and content_end > 0:
+            last_line = lines[content_end - 1]
+            weak_patterns = [
+                r'^(他|她|它|我|你)\w{0,2}(转身走了|转身离开了|走了出去|上车了|下车了|回头看了)[。]*$',
+                r'^(天亮了|天黑了|雨停了|风停了)$',
+                r'^△\s*车继续往前[开走][。]*$',
+            ]
+            is_weak = False
+            for pat in weak_patterns:
+                if re.match(pat, last_line):
+                    is_weak = True
+                    break
+            if is_weak:
+                issues.append(f"尾句钩子不足：\"{last_line[:40]}\"（禁止描述性收束/自然结束）")
+
+    if issues:
+        return {"pass": False, "reasons": issues}
+    return {"pass": True}
+
+
+async def _run_checkpoint_qc(agent, loop, outline: str, iterator, up_to_ci: int, rewind_count: int = 0):
+    """每10集结构性质检：对比大纲和已生成剧情，检测角色消失/冲突跑偏。
+    返回 (passed: bool, restart_ci: int, reason: str)"""
+    if rewind_count >= 1:
+        return True, 0, ""
+
+    blocks_with_output = []
+    for bi in range(up_to_ci):
+        blk = iterator.blocks[bi]
+        output = blk.get("_output", "")
+        if output and len(output) > 500:
+            blocks_with_output.append((blk["name"], blk["content"], output))
+
+    if len(blocks_with_output) < 5:
+        return True, 0, ""
+
+    # 只对比已生成集数对应的大纲段（前 up_to_ci 集），不是全 80 集
+    ep_markers = list(re.finditer(
+        r'(?:^|\n)(?:\*{1,3}\s*\*{0,2}|#{1,3}\s*)第\d+[集章节]', outline
+    ))
+    if len(ep_markers) > up_to_ci:
+        checked_outline = outline[:ep_markers[up_to_ci].start()]
+    else:
+        checked_outline = outline[:6000]
+
+    snapshot_lines = []
+    for name, outline_sec, text in blocks_with_output:
+        snapshot_lines.append(f"\n## {name}")
+        snapshot_lines.append(f"大纲: {outline_sec[:200]}")
+        snapshot_lines.append(f"剧情首尾: {text[:300]}...{text[-300:]}")
+
+    prompt = (
+        f"你是剧本质检。当前进度第{up_to_ci}集——只检查前{up_to_ci}集内应该完成的内容。\n\n"
+        f"## 待检查的大纲段（前{up_to_ci}集）\n"
+        f"{checked_outline[:6000]}\n\n"
+        "## 已生成剧集内容\n"
+        + "\n".join(snapshot_lines) +
+        f"\n\n检查前{up_to_ci}集内:\n"
+        "1. 这些集数内大纲提到的主要角色都出场了吗？\n"
+        "2. 这些集数内的核心事件都发生了吗？\n"
+        "3. 如果有严重偏离（角色消失/核心事件未发生），从第几集开始偏的？\n\n"
+        "注意: 后面集数的角色和事件还没写到，不算偏离。\n"
+        "如果基本符合: 回复 PASS\n"
+        "只有严重偏离时才回复: FAIL 第X集 原因:[一句话]"
+    )
+
+    def _run():
+        result = ""
+        try:
+            for token in agent.call_llm_stream(prompt, "", temperature=0.3):
+                result += token
+        except Exception:
+            pass
+        return result
+
+    result = await loop.run_in_executor(None, _run)
+
+    if "FAIL" not in result:
+        return True, 0, ""
+
+    ep_match = re.search(r'第(\d+)集', result)
+    restart_ep = int(ep_match.group(1)) if ep_match else max(1, up_to_ci - 3)
+    restart_ci = max(0, restart_ep - 1)
+    restart_ci = min(restart_ci, up_to_ci - 1)
+    if restart_ci < up_to_ci - 5:
+        restart_ci = up_to_ci - 5
+
+    return False, restart_ci, result.strip()[:200]
 
 
 class AsyncOrchestrator:
@@ -53,6 +272,69 @@ class AsyncOrchestrator:
 
     def __init__(self, ws_manager: ConnectionManager):
         self.ws = ws_manager
+        self._screenplay_pipeline_task = None
+        self._screenplay_trigger_count = 2
+
+    async def _analyze_and_confirm_duration(self, project, project_name: str, style):
+        """自动时长模式：LLM分析大纲 → 建议集数 → 用户确认 → 回填配置"""
+        default = get_type_default(style.story_type)
+        per_ep = default["per_ep"]
+        type_name = default["name"]
+
+        outline = project.read_output("01_故事大纲/故事大纲.md") or ""
+        if not outline:
+            return
+
+        agent = create_agent("plot_expander")
+        if not agent or not hasattr(agent, 'llm'):
+            return
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, analyze_duration, agent.call_llm_stream, style.story_type, outline
+        )
+        if not result:
+            return
+
+        result["per_ep"] = per_ep
+        result["type_name"] = type_name
+
+        await self.ws.send_message(project_name, {
+            "type": "auto_duration_suggest",
+            "suggestion": result,
+            "phase_index": 0,
+        })
+
+        confirmed = await self.ws.wait_for_duration_confirm(project_name)
+        if not confirmed:
+            return
+
+        confirmed_count = confirmed.get("count", result["count"])
+        confirmed_duration = confirmed.get("duration", per_ep)
+
+        project.config["episode_count"] = str(confirmed_count)
+        project.config["episode_duration"] = confirmed_duration
+        project.save_config()
+
+        style.episode_count = str(confirmed_count)
+        style.episode_duration = confirmed_duration
+
+        total_seconds = 0
+        try:
+            dur_num = int(''.join(c for c in confirmed_duration if c.isdigit()))
+            if "分钟" in confirmed_duration or "字" in confirmed_duration:
+                total_seconds = 60
+            else:
+                total_seconds = 60
+        except:
+            pass
+        total_minutes = confirmed_count
+        await self.ws.send_message(project_name, {
+            "type": "auto_duration_confirmed",
+            "count": confirmed_count,
+            "duration": confirmed_duration,
+            "total_minutes": total_minutes,
+        })
 
     def _validate_and_notify(self, project, project_name: str, phase_index: int, content: str):
         """Check content volume and warn if exceeds target"""
@@ -81,16 +363,36 @@ class AsyncOrchestrator:
 
     async def _check_qc_and_notify(self, project, project_name, phase_index, agent_name):
         try:
-            qc_warnings = run_qc_check(agent_name, project.project_dir)
-            if qc_warnings:
+            warnings = list(run_qc_check(agent_name, project.project_dir))
+
+            _AGENT_OUTPUT_MAP = {
+                "plot_expander": "02_完整剧情/完整剧情.md",
+                "screenplay_writer": "03_完整剧本/完整剧本.md",
+                "outline_designer": "01_故事大纲/故事大纲.md",
+            }
+            output_rel = _AGENT_OUTPUT_MAP.get(agent_name, "")
+            if output_rel and agent_name in ("plot_expander", "screenplay_writer"):
+                outline = project.read_output("01_故事大纲/故事大纲.md") or ""
+                phase_output = project.read_output(output_rel) or ""
+                if outline and phase_output and len(phase_output) > 500:
+                    agent = create_agent(agent_name)
+                    if agent and hasattr(agent, 'llm'):
+                        result = await asyncio.get_event_loop().run_in_executor(
+                            None, run_ai_quality_check, agent.llm, outline, phase_output, agent_name
+                        )
+                        ai_warnings = qc_result_to_warnings(result)
+                        if ai_warnings:
+                            warnings.extend(ai_warnings)
+
+            if warnings:
                 await self.ws.send_message(project_name, {
                     "type": "qc_warnings",
                     "phase": agent_name,
-                    "warnings": qc_warnings,
+                    "warnings": warnings,
                 })
-                logger.warning(f"QC警告 [{agent_name}]: {len(qc_warnings)} 条")
+                logger.warning(f"QC警告 [{agent_name}]: {len(warnings)} 条")
         except Exception as e:
-            logger.error(f"QC检查失败: {e}")
+            logger.warning(f"QC 检查异常: {e}")
 
     async def run(self, project_name: str, style_data: dict):
         project = ProjectManager(project_name)
@@ -157,9 +459,18 @@ class AsyncOrchestrator:
                 if idx == pending_ver and idx >= 0 and phase.agent == "outline_designer":
                     await self._resume_version_selection(project, project_name, idx, style)
                     continue
+                # 兜底：pending_version 在断线时被清除，但磁盘上方向卡还在
+                if phase.agent == "outline_designer" and idx == 0:
+                    existing = project.read_output(output_path) or ""
+                    if existing and len(existing) > 100 and ("版本A" in existing or "版本B" in existing):
+                        project.set_pending_version(idx)
+                        await self._resume_version_selection(project, project_name, idx, style)
+                        continue
 
                 snake_name = phase.agent
                 agent = create_agent(snake_name)
+                if hasattr(agent, 'douyin') and (style.story_type == "1" or style.writer_mode == "minimal"):
+                    agent.douyin = True
 
                 input_content = await self._get_input(project, phase)
 
@@ -186,6 +497,13 @@ class AsyncOrchestrator:
                 if idx == pending_ver and idx >= 0 and phase.agent == "outline_designer":
                     await self._resume_version_selection(project, project_name, idx, style)
                     continue
+                # 兜底：pending_version 在断线时被清除，但磁盘上方向卡还在
+                if phase.agent == "outline_designer" and idx == 0:
+                    existing = project.read_output(self._get_output_path(phase)) or ""
+                    if existing and len(existing) > 100 and ("版本A" in existing or "版本B" in existing):
+                        project.set_pending_version(idx)
+                        await self._resume_version_selection(project, project_name, idx, style)
+                        continue
 
                 # Check if phase has existing content (confirmed but not approved)
                 is_outline = phase.agent == "outline_designer"
@@ -265,6 +583,32 @@ class AsyncOrchestrator:
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
                         project.write_output(output_path, full_output)
 
+                        # 大纲集数校验：自动审核模式下，集数不足自动重试
+                        expected_eps = int(style.episode_count) if style.episode_count and style.episode_count.isdigit() else 0
+                        if expected_eps > 0 and self.ws.auto_approve_flags.get(project_name, False):
+                            ep_count_retries = 0
+                            while ep_count_retries < 3:
+                                actual_eps = len(re.findall(
+                                    r'(?:^|\n)(?:\*{1,3}\s*\*{0,2}|#{1,3}\s*)第\d+[集章节]', full_output
+                                ))
+                                if actual_eps >= expected_eps:
+                                    break
+                                ep_count_retries += 1
+                                logger.warning(f"大纲集数不足: {actual_eps}/{expected_eps}，重试 {ep_count_retries}/3")
+                                retry_input = second_input + (
+                                    f"\n\n## 修改意见\n你只写了 {actual_eps} 集，但需要恰好 {expected_eps} 集。"
+                                    f"请从第1集到第{expected_eps}集逐集完整写出，少一集都不行。"
+                                )
+                                full_output = await self._run_agent_in_thread(agent, project, style, retry_input, project_name, idx)
+                                full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
+                                project.write_output(output_path, full_output)
+                            if ep_count_retries >= 3:
+                                logger.error(f"大纲集数校验失败: 3次重试后仍不足 {expected_eps} 集")
+                                await self.ws.send_message(project_name, {
+                                    "type": "episode_count_warning",
+                                    "message": f"大纲集数可能不足 {expected_eps} 集，已自动重试3次",
+                                })
+
                     project.config.pop("_version_selected", None)
                     project.save_config()
 
@@ -303,13 +647,42 @@ class AsyncOrchestrator:
 
                     if approval.get("approved"):
                         project.mark_phase_done(idx)
+
+                        if style.duration_mode == "1":
+                            await self._analyze_and_confirm_duration(project, project_name, style)
+
                     project.clear_pending_approval()
                     if approval.get("confirmed"):
                         await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                         break
                     continue
+                elif phase.agent == "story_engine":
+                    from agents.story_engine import StoryEngine
+                    outline_text = project.read_output("01_故事大纲/故事大纲.md") or ""
+                    episode_count = int(style.episode_count) if style.episode_count and style.episode_count.isdigit() else 80
+                    loop = asyncio.get_event_loop()
+                    beats = await loop.run_in_executor(
+                        None,
+                        lambda: StoryEngine().run_from_outline(outline_text, episode_count)
+                    )
+                    if beats:
+                        project.write_output(output_path, json.dumps(beats, ensure_ascii=False, indent=2))
+                    project.mark_phase_done(idx)
                 else:
                     # 非大纲阶段，正常处理
+                    # 流水线：如果剧本已在后台生成，直接等待并跳过
+                    if phase.agent == "screenplay_writer" and self._screenplay_pipeline_task:
+                        logger.info(f"流水线: 等待剧本后台任务完成")
+                        await self._screenplay_pipeline_task
+                        self._screenplay_pipeline_task = None
+                        project.mark_phase_done(idx)
+                        project.clear_pending_approval()
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_complete", "phase_index": idx,
+                            "phase_name": phase.name, "file_path": "03_完整剧本/完整剧本.md",
+                        })
+                        continue
+
                     if hasattr(agent, '_bible_mode') and agent._bible_mode:
                         full_output = await self._run_agent_in_thread(agent, project, style, input_content, project_name, idx)
                         full_output = self._reorder_chunked_stream(agent, full_output, project_name, idx)
@@ -364,12 +737,40 @@ class AsyncOrchestrator:
 
     async def continue_run(self, project_name: str, style_data: dict):
         """从第一个未完成的阶段继续生成，跳过已完成的阶段"""
+        logger.info(f"[CONTINUE] {project_name} 开始 continue_run, style_data keys={list(style_data.keys())}")
         project = ProjectManager(project_name)
+
+        # 从 project_config 补齐缺失的 style 参数
+        if not style_data or not style_data.get("story_type"):
+            proj_style = project.config.get("style", {})
+            if not style_data:
+                style_data = {}
+            if not style_data.get("story_type") and proj_style.get("story_type"):
+                style_data["story_type"] = proj_style["story_type"]
+            if not style_data.get("genre") and proj_style.get("genre"):
+                style_data["genre"] = proj_style["genre"]
+            if not style_data.get("episode_count") and proj_style.get("episode_count"):
+                style_data["episode_count"] = proj_style["episode_count"]
+            if not style_data.get("episode_duration") and proj_style.get("episode_duration"):
+                style_data["episode_duration"] = proj_style["episode_duration"]
+            if not style_data.get("writing_style") and proj_style.get("writing_style"):
+                style_data["writing_style"] = proj_style["writing_style"]
+            if not style_data.get("visual_style") and proj_style.get("visual_style"):
+                style_data["visual_style"] = proj_style["visual_style"]
+            if not style_data.get("art_style") and proj_style.get("art_style"):
+                style_data["art_style"] = proj_style["art_style"]
+            if not style_data.get("screen_aspect") and proj_style.get("screen_aspect"):
+                style_data["screen_aspect"] = proj_style["screen_aspect"]
+            if not style_data.get("script_style") and proj_style.get("script_style"):
+                style_data["script_style"] = proj_style["script_style"]
+
         style = self._build_style(style_data)
+        logger.info(f"[CONTINUE] {project_name} style built, story_type={style.story_type}, ep_count={style.episode_count}")
 
         try:
             phases = WorkflowLoader.load()
             total = len(phases)
+            logger.info(f"[CONTINUE] {project_name} loaded {total} phases")
             start_idx = total
             config_phases = project.config.get("phases", [])
             config_names = [p["name"] for p in config_phases]
@@ -387,13 +788,39 @@ class AsyncOrchestrator:
                     start_idx = idx
                     break
 
+            logger.info(f"[CONTINUE] {project_name} 起始阶段 idx={start_idx}, total={total}")
             if start_idx >= total:
+                logger.info(f"[CONTINUE] {project_name} 全部完成，发送 all_complete")
                 await self.ws.send_message(project_name, {"type": "all_complete"})
                 return
 
             await self.ws.send_message(project_name, {
                 "type": "progress", "current": start_idx, "total": total,
             })
+
+            # 发送已完成阶段的内容给前端（重连/新连接的客户端看不到历史阶段）
+            for idx in range(start_idx):
+                phase = phases[idx]
+                if not phase.should_run(style.story_type):
+                    continue
+                config_name = self.AGENT_TO_CONFIG.get(phase.agent, phase.agent)
+                phase_done = False
+                for p in config_phases:
+                    if p.get("name") == config_name:
+                        phase_done = p.get("done", False)
+                        break
+                if phase_done:
+                    output_path = self._get_output_path(phase)
+                    content = project.read_output(output_path) or ""
+                    if content:
+                        await self.ws.send_message(project_name, {
+                            "type": "stream", "phase_index": idx,
+                            "chunk": content,
+                        })
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_complete", "phase_index": idx,
+                            "phase_name": phase.name, "file_path": output_path,
+                        })
 
             paused_phase = False
             for idx in range(start_idx, total):
@@ -418,6 +845,11 @@ class AsyncOrchestrator:
                     await self._resume_approval(project, project_name, idx, style)
                     continue
 
+                # story_engine (beat sheet) is silent - skip if done
+                if phase.agent == "story_engine":
+                    project.mark_phase_done(idx)
+                    continue
+
                 pending_ver = project.config.get("pending_version", -1)
                 if idx == pending_ver and idx >= 0 and phase.agent == "outline_designer":
                     await self._resume_version_selection(project, project_name, idx, style)
@@ -429,6 +861,14 @@ class AsyncOrchestrator:
                 pending_ep = project.pending_episode
                 chunk_resume_ci = 0
                 existing_full_parts = None
+                if pending_ep and pending_ep.get("phase_index") == idx:
+                    # 先验证 pending_ep 的 chunk_files 是否还在磁盘上
+                    chunk_files = pending_ep.get("chunk_files", [])
+                    any_exists = any(project.read_output(cf) for cf in chunk_files)
+                    if not any_exists:
+                        logger.info(f"[CONTINUE] {project_name} pending_ep 无有效文件，清除")
+                        project.clear_pending_episode()
+                        pending_ep = None
                 if pending_ep and pending_ep.get("phase_index") == idx:
                     resumed = await self._resume_chunked_approval(project, project_name, idx, pending_ep)
                     if resumed == "_paused":
@@ -461,11 +901,14 @@ class AsyncOrchestrator:
                             existing_full_parts = parts
                 # 无 pending_episode 时自动扫描已存在的剧集，从中断处继续
                 if chunk_resume_ci == 0 and existing_full_parts is None and phase.split:
-                    existing_dirs = sorted(
-                        [d for d in (project.project_dir / Path(output_path).parent).iterdir()
-                         if d.is_dir() and re.search(r'第\d+集', d.name)],
-                        key=lambda d: int(re.search(r'第(\d+)集', d.name).group(1)) if re.search(r'第(\d+)集', d.name) else 0
-                    )
+                    output_parent = project.project_dir / Path(output_path).parent
+                    existing_dirs = []
+                    if output_parent.exists():
+                        existing_dirs = sorted(
+                            [d for d in output_parent.iterdir()
+                             if d.is_dir() and re.search(r'第\d+集', d.name)],
+                            key=lambda d: int(re.search(r'第(\d+)集', d.name).group(1)) if re.search(r'第(\d+)集', d.name) else 0
+                        )
                     if existing_dirs:
                         chunk_resume_ci = len(existing_dirs)
                         parts = []
@@ -509,9 +952,12 @@ class AsyncOrchestrator:
 
                 snake_name = phase.agent
                 agent = create_agent(snake_name)
+                if hasattr(agent, 'minimalist') and style.writer_mode == "minimal":
+                    agent.minimalist = True
+                if hasattr(agent, 'douyin') and style.story_type == "1":
+                    agent.douyin = True
 
                 input_content = await self._get_input(project, phase)
-
                 if phase.agent == "outline_designer":
                     task = project.read_output("00_任务指令/任务指令.md") or input_content
                     input_content = task
@@ -676,6 +1122,35 @@ class AsyncOrchestrator:
                         await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                         break
                     continue
+                elif phase.agent == "story_engine":
+                    await self.ws.send_message(project_name, {
+                        "type": "phase_start", "phase_index": idx,
+                        "phase_name": "节拍表",
+                    })
+                    from agents.story_engine import StoryEngine
+                    outline_text = project.read_output("01_故事大纲/故事大纲.md") or ""
+                    episode_count = int(style.episode_count) if style.episode_count and style.episode_count.isdigit() else 80
+                    engine = StoryEngine()
+                    beats = engine.run_from_outline(outline_text, episode_count)
+                    if beats:
+                        project.write_output(output_path, json.dumps(beats, ensure_ascii=False, indent=2))
+                        project.mark_phase_done(idx)
+                        await self.ws.send_message(project_name, {
+                            "type": "stream", "phase_index": idx,
+                            "chunk": "节拍表已生成：" + str(len(beats)) + "集",
+                        })
+                        await self.ws.send_message(project_name, {
+                            "type": "phase_complete", "phase_index": idx,
+                            "phase_name": phase.name, "file_path": output_path,
+                            "beat_count": len(beats),
+                        })
+                    else:
+                        await self.ws.send_message(project_name, {
+                            "type": "error", "message": "节拍表生成失败，跳过节拍表阶段",
+                            "phase_index": idx,
+                        })
+                        project.mark_phase_done(idx)
+                    await self.ws.send_message(project_name, {"type": "phase_confirmed", "phase_index": idx})
                 else:
                     # 非大纲阶段，正常处理
                     if phase.split:
@@ -771,6 +1246,10 @@ class AsyncOrchestrator:
 
             snake_name = phase.agent
             agent = create_agent(snake_name)
+            if hasattr(agent, 'minimalist') and style.writer_mode == "minimal":
+                agent.minimalist = True
+            if hasattr(agent, 'douyin') and style.story_type == "1":
+                agent.douyin = True
 
             input_content = await self._get_input(project, phase)
             if phase.agent == "outline_designer":
@@ -950,6 +1429,14 @@ class AsyncOrchestrator:
         except asyncio.CancelledError:
             pass
 
+    @staticmethod
+    def _auto_anchor_abstract_concepts(custom_requirements: str) -> str:
+        anchor_rules = [
+            "画面永远比解释多一步。抽象概念通过实物触发：钟停在几点几分、水杯里没有波纹、镜子里多了一行字。",
+            "同一画面、同一句话、同一句台词——在同一集中绝对不要重复。每个△行描述一个新的视觉变化。",
+        ]
+        return custom_requirements + "\n\n" + "\n".join(anchor_rules)
+
     def _build_style(self, style_data: dict) -> StyleConfig:
         style = StyleConfig()
         style.story_type = style_data.get("story_type", "")
@@ -965,6 +1452,10 @@ class AsyncOrchestrator:
         style.custom_requirements = style_data.get("custom_requirements", "")
         style.visual_reference = style_data.get("visual_reference", "")
         style.action_reference = style_data.get("action_reference", "")
+        style.mood = style_data.get("mood", "")
+        style.custom_requirements = self._auto_anchor_abstract_concepts(
+            style.custom_requirements
+        )
         return style
 
     async def _wait_for_version(self, project_name: str) -> dict:
@@ -1071,10 +1562,10 @@ class AsyncOrchestrator:
         error_info = None
         while True:
             try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=180)
+                chunk = await asyncio.wait_for(queue.get(), timeout=600)
             except asyncio.TimeoutError:
                 cancelled[0] = True
-                error_msg = f"生成超时（180秒无响应），请检查模型是否正常运行"
+                error_msg = f"生成超时（600秒无响应），请检查模型是否正常运行"
                 await self.ws.send_message(project_name, {
                     "type": "error", "message": error_msg, "phase_index": phase_index,
                 })
@@ -1115,6 +1606,10 @@ class AsyncOrchestrator:
                 break
             snake_name = phase.agent
             agent = create_agent(snake_name)
+            if hasattr(agent, 'minimalist') and style and style.writer_mode == "minimal":
+                agent.minimalist = True
+            if hasattr(agent, 'douyin') and style and style.story_type == "1":
+                agent.douyin = True
             output_content = project.read_output(self._get_output_path(phase)) or ""
             if phase.agent == "outline_designer":
                 revised_input = "## 用户选择\n请生成版本A的完整大纲。\n\n## 修改意见\n" + feedback
@@ -1151,6 +1646,7 @@ class AsyncOrchestrator:
             await self.ws.send_message(project_name, {
                 "type": "stream", "phase_index": phase_index, "chunk": content,
             })
+            await asyncio.sleep(0.3)
 
         project.set_pending_version(phase_index)
         version_result = await self._wait_for_version(project_name)
@@ -1257,6 +1753,244 @@ class AsyncOrchestrator:
                 result.append(line)
         return '\n'.join(result)
 
+    def _ep_sort_key(self, name: str):
+        nums = re.findall(r'\d+', name)
+        return int(nums[0]) if nums else 0
+
+    async def _run_screenplay_pipeline(self, project, project_name: str, style):
+        """后台流水线：每检测到新剧情分集，立即生成对应剧本。与 plot 并行。"""
+        from agents.screenplay_writer import ScreenplayWriter
+        import os
+
+        plot_dir = project.project_dir / "02_完整剧情"
+        script_dir = project.project_dir / "03_完整剧本"
+        script_dir.mkdir(parents=True, exist_ok=True)
+
+        processed = set()
+        total_expected = int(style.episode_count) if style.episode_count and style.episode_count.isdigit() else 80
+
+        await self.ws.send_message(project_name, {
+            "type": "phase_start", "phase_index": 3,
+            "phase_name": "完整剧本（流水线）", "total_phases": 7,
+        })
+
+        while True:
+            # 扫描已完成剧情分集
+            if not plot_dir.exists():
+                await asyncio.sleep(5)
+                continue
+
+            plot_subdirs = sorted(
+                [d for d in plot_dir.iterdir() if d.is_dir()],
+                key=lambda d: self._ep_sort_key(d.name)
+            )
+            available = [d for d in plot_subdirs if d.name not in processed]
+            if not available:
+                # 检查 plot 是否全部完成
+                config_phases = project.config.get("phases", [])
+                plot_done = any(
+                    p.get("name", "") == "完整剧情" and p.get("done")
+                    for p in config_phases
+                )
+                if plot_done or len(plot_subdirs) >= total_expected:
+                    break
+                await asyncio.sleep(3)
+                continue
+
+            # 取下一批待处理的剧情
+            batch = available[:4]  # 一次处理 4 个分集
+            for ep_dir in batch:
+                ep_name = ep_dir.name
+                md_path = ep_dir / "完整剧情.md"
+                if not md_path.exists():
+                    continue
+                plot_text = md_path.read_text(encoding="utf-8")
+
+                # 构建上下文：仅取前一集剧本尾段，避免历史主题在后半段累积压过本集剧情
+                prev_scripts = []
+                _prev_sorted = sorted(
+                    [sd for sd in script_dir.iterdir()
+                     if sd.is_dir() and sd.name < ep_name and (sd / "完整剧本.md").exists()],
+                    key=lambda d: self._ep_sort_key(d.name)
+                )
+                if _prev_sorted:
+                    _last = _prev_sorted[-1] / "完整剧本.md"
+                    prev_scripts.append(_last.read_text(encoding="utf-8")[-1200:])
+
+                # 构建 prompt
+                agent = ScreenplayWriter()
+                agent.douyin = (style.story_type == "1" or style.writer_mode == "minimal")
+
+                if agent.douyin:
+                    template = agent.load_prompt_template("screenplay_writer_douyin.txt")
+                else:
+                    template = agent.load_prompt_template("screenplay_writer.txt")
+                    meta = agent._load_plot_meta(project, plot_text)
+                    template = template.replace("{confirmed_direction}", meta["confirmed_direction"])
+                    template = template.replace("{promise_list}", meta["promise_list"])
+
+                outline_text = project.read_output("01_故事大纲/故事大纲.md") or ""
+                voice_labels_pipeline = []
+                if outline_text and agent.douyin:
+                    from core.voice_labels import format_voice_injection, extract_voice_labels
+                    voice_labels_pipeline = extract_voice_labels(outline_text)
+                    voice = format_voice_injection(voice_labels_pipeline)
+                    if voice:
+                        template += "\n\n" + voice
+
+                if agent.douyin:
+                    bible = load_bible(project.project_dir)
+                    if bible:
+                        bible_inj = format_bible_injection(bible)
+                        if bible_inj:
+                            template += "\n\n" + bible_inj
+                    from core.voice_labels import build_hard_constraint_card
+                    card = build_hard_constraint_card(outline_text)
+                    if card:
+                        template += card
+
+                anchor = _build_creative_anchor(project)
+                if anchor:
+                    template += anchor
+
+                # 生成：本集剧情不再内联中段，改放末尾（见下方追加），此处仅占位
+                prompt = template.replace("{plot_structure}", "（本集剧情见文末「本集剧情·唯一事件依据」一节，以那里为准）")
+
+                # Batch hint goes AFTER main prompt — the last instruction carries the most weight
+                _nums = re.findall(r'\d+', ep_name)
+                is_batch = len(_nums) >= 2
+                if is_batch:
+                    s, e = int(_nums[0]), int(_nums[-1])
+                    all_eps = "、".join([f"第{i}集" for i in range(s, e + 1)])
+                    prompt += (
+                        f"\n\n【批量生成指令——必须严格遵守，这是最终要求】"
+                        f"\n本批次需要一次性生成以下 {e-s+1} 集完整剧本：{all_eps}。"
+                        f"\n每集不少于 1000 字，必须包含画面描述和对白。"
+                        f"\n每集以「第X集」作为独立标题（不加##标记）。集与集之间用空行分隔。"
+                        f"\n每集结尾必须有悬念钩子。"
+                        f"\n重要：在输出「**（全文完）**」之前，请逐集检查是否已生成全部 {e-s+1} 集。"
+                        f"\n禁止省略、合并、跳过任何一集。禁止把多集写成一段。"
+                    )
+                else:
+                    prompt += f"\n\n当前正在生成：{ep_name}"
+
+                if prev_scripts:
+                    # 清洗旧格式，避免LLM跟着抄
+                    cleaned = []
+                    for ps in prev_scripts[-3:]:
+                        c = re.sub(r'^#{1,3}\s+.*$', '', ps, flags=re.MULTILINE)
+                        c = re.sub(r'^出场角色：.*$', '', c, flags=re.MULTILINE)
+                        c = re.sub(r'^---\s*$', '', c, flags=re.MULTILINE)
+                        c = re.sub(r'\n{3,}', '\n\n', c)
+                        cleaned.append(c)
+                    prompt += "\n\n## 前序剧本\n\n" + "\n\n".join(cleaned)
+
+                # 格式约束放最后——LLM对末尾注意力最高
+                ep_num = re.search(r'\d+', ep_name)
+                ep_n = ep_num.group(0) if ep_num else "1"
+                voice_rules_p = ""
+                if voice_labels_pipeline:
+                    voice_rules_p = "\n\n## ⚠️ 每人说话方式——逐人硬约束（不遵守则全批作废）\n\n"
+                    for vl in voice_labels_pipeline:
+                        voice_rules_p += f"- {vl['name']}：{vl['tag']}\n"
+                    voice_rules_p += "\n写完每句对白自查：删掉角色名还能认出是谁说的吗？认不出就重写。\n"
+                else:
+                    voice_rules_p = "\n\n## ⚠️ 对白声音分化\n\n- 两个角色不能说出同样长度、同样句式、同样情绪的对白\n- 写完每句对白自查：删掉角色名还能认出是谁说的吗？\n\n"
+                prompt += (
+                    f"\n\n## ⚠️ 输出格式强制要求\n\n"
+                    f"开头: {ep_name}\n"
+                    f"场头: 场{ep_n}-{{序号}}  时间  内外  地点\n"
+                    f"  例如: 场{ep_n}-1  夜  内  客厅\n"
+                    f"动作: △ 描述（每条1-2句）\n"
+                    f"对白: 角色名（情绪/动作）：对白（同行写，不换行）\n"
+                    f"换场: 空一行后写新场头\n"
+                    f"结尾: **（全文完）**\n\n"
+                    f"禁止: ##标记、###标记、出场角色行、对白独占三行、对白超15字\n"
+                    f"⚠️ 每集只写1-2场（抖音短剧2分钟一集，场多了观众记不住场景）。1场一镜到底最好，2场只在必须换地点时用。3场以上视为废稿。\n"
+                    f"{voice_rules_p}"
+                    f"示例:\n"
+                    f"{ep_name}\n\n"
+                    f"场{ep_n}-1  夜  内  客厅\n\n"
+                    f"△ 蜡烛只剩一根亮着。\n\n"
+                    f"陈国栋（掏手机）：谁？\n\n"
+                    f"△ 屏幕上躺着短信。\n\n"
+                    f"场{ep_n}-2  日  外  门口\n\n"
+                    f"△ 铁门上贴着黄纸条。\n\n"
+                    f"陈国栋vo：三十年了。\n\n"
+                    f"**（全文完）**"
+                )
+
+                # 本集剧情放在最末尾——LLM对末尾注意力最高，确保本集事件不被前序上下文/历史主题淹没
+                prompt += (
+                    f"\n\n## ⚠️ 本集剧情·唯一事件依据（最高优先级）\n\n"
+                    f"以下是{ep_name}的剧情，是本集唯一的事件来源。"
+                    f"你必须把其中描述的每一个具体动作、每一处场景、每一个道具逐一转成镜头。"
+                    f"故事主线和人物情感要延续前文，但本集发生的【事件】必须严格按下面这份剧情推进，"
+                    f"禁止用前几集已经出现过的场景、画面或台词替代本集剧情，禁止停在原地复述。\n\n"
+                    f"{plot_text}"
+                )
+
+                # 结尾钩子强化——放最末尾，决定追剧率。验证可显著把抒情收束改成真钩子
+                prompt += (
+                    f"\n\n## ⚠️ 结尾钩子·强制要求（追剧率命门，最高优先级）\n"
+                    f"本集最后一个镜头必须是「不公平钩子」——让观众知道一件角色还不知道的事，"
+                    f"或一个正在发生、尚未揭晓结果的危险/异常。\n"
+                    f"禁止用以下方式收尾（这些会让观众划走）：\n"
+                    f"- 情绪收束：『她没有回头』『她哭了』『她笑了』『阳光落在她身上』\n"
+                    f"- 平淡动作：『她往前走』『她走出去』『天亮了』\n"
+                    f"- 模糊意象：『像是在笑』『又像是哭』\n"
+                    f"正确钩子示例：『△ 她锁上门。△ 门内，那张照片自己翻了一面。』"
+                    f"『△ 手机亮了。△ 屏幕上是她自己的号码——正在拨入。』\n"
+                    f"最后一行必须制造『下一集会发生什么』的疑问，不是给本集画句号。"
+                )
+
+                chunk_output = ""
+                retries = 0
+                while retries < 3:
+                    try:
+                        for token in agent.call_llm_stream(prompt, "", temperature=0.8):
+                            chunk_output += token
+                        break
+                    except Exception as e:
+                        retries += 1
+                        logger.error(f"剧本流水线 [{ep_name}] LLM失败 ({retries}/3): {e}")
+                        if retries >= 3:
+                            break
+                        await asyncio.sleep(5)
+
+                if not chunk_output.strip():
+                    processed.add(ep_name)
+                    continue
+
+                # 保存
+                save_dir = script_dir / ep_name
+                save_dir.mkdir(parents=True, exist_ok=True)
+                (save_dir / "完整剧本.md").write_text(chunk_output, encoding="utf-8")
+
+                processed.add(ep_name)
+                logger.info(f"剧本流水线: {ep_name} 完成")
+
+            # 合并已生成的所有剧本
+            all_scripts = []
+            for sd in sorted(script_dir.iterdir(), key=lambda d: self._ep_sort_key(d.name)):
+                if sd.is_dir():
+                    sf = sd / "完整剧本.md"
+                    if sf.exists():
+                        all_scripts.append(sf.read_text(encoding="utf-8"))
+            if all_scripts:
+                (script_dir / "完整剧本.md").write_text("\n\n---\n\n".join(all_scripts), encoding="utf-8")
+
+            # 检查是否全部完成
+            config_phases = project.config.get("phases", [])
+            plot_done = any(p.get("name", "") == "完整剧情" and p.get("done") for p in config_phases)
+            if (plot_done and len(processed) >= len(plot_subdirs)) or len(processed) >= total_expected:
+                break
+
+        await self.ws.send_message(project_name, {
+            "type": "phase_complete", "phase_index": 3,
+            "phase_name": "完整剧本（流水线）",
+        })
+
     async def _run_chunked_generation(self, agent_class, project, style, input_content, project_name, output_path, phase_index,
                                       start_ci=0, existing_full_parts=None):
         """逐集生成+审核：每集生成完->保存->审核->通过后才生成下一集
@@ -1321,6 +2055,18 @@ class AsyncOrchestrator:
                 continue
             display_name = ctx.name if ctx.name else f"第{ci+1}集"
 
+            # 大纲加权：当前集大纲 + 前后各2集，让LLM知道从哪来到哪去
+            if "完整剧情" in output_path and len(iterator.blocks) > 5:
+                expanded = ""
+                for offset in range(-2, 3):
+                    ni = chunk_index + offset
+                    if 0 <= ni < len(iterator.blocks):
+                        blk = iterator.blocks[ni]
+                        tag = "【本集大纲-必须遵循】" if offset == 0 else f"（第{ni+1}集大纲参考·{abs(offset)}集{'后' if offset>0 else '前'}）"
+                        expanded += f"\n{tag}\n{blk['content']}\n"
+                if expanded:
+                    ctx.outline_section = expanded
+
             # 生成单集（在后台线程中运行 generate_chunk，流式输出）
             loop = asyncio.get_event_loop()
             queue = asyncio.Queue()
@@ -1337,6 +2083,18 @@ class AsyncOrchestrator:
                 if injection:
                     kwargs["template"] = kwargs["template"] + "\n\n## 前情提要（上一集状态追踪）\n\n" + injection
                     logger.info(f"ContinuityLog 已注入前情提要到 {display_name}")
+
+            story_bible = load_bible(project.project_dir)
+            if story_bible:
+                bible_injection = format_bible_injection(story_bible)
+                if bible_injection:
+                    kwargs["template"] = kwargs["template"] + "\n\n" + bible_injection
+                    logger.info(f"StoryBible 已注入到 {display_name}")
+
+            anchor = _build_creative_anchor(project)
+            if anchor:
+                kwargs["template"] = kwargs["template"] + anchor
+                logger.info(f"[ANCHOR] 创作锚点已注入到 {display_name}")
 
             def _run():
                 try:
@@ -1360,11 +2118,11 @@ class AsyncOrchestrator:
             try:
                 while True:
                     try:
-                        token = await asyncio.wait_for(queue.get(), timeout=180)
+                        token = await asyncio.wait_for(queue.get(), timeout=900)
                     except asyncio.TimeoutError:
                         cancelled[0] = True
                         await self.ws.send_message(project_name, {
-                            "type": "error", "message": "生成超时（180秒无响应）", "phase_index": phase_index,
+                            "type": "error", "message": "生成超时（900秒无响应）", "phase_index": phase_index,
                         })
                         raise RuntimeError("生成超时")
                     if token is None:
@@ -1391,6 +2149,27 @@ class AsyncOrchestrator:
             iterator.set_output(chunk_index, chunk_output)
             if hasattr(agent, '_last_chunk_output'):
                 agent._last_chunk_output = chunk_output
+
+            # 自动审核模式：出厂质检
+            if self.ws.auto_approve_flags.get(project_name, False):
+                ep_count = int(style.episode_count) if style.episode_count and style.episode_count.isdigit() else 0
+                qc = _validate_chunk_quality(chunk_output, ep_count, phase=output_path)
+                if not qc["pass"]:
+                    retry_key = f"_qc_retry_{phase_index}_{chunk_index}"
+                    retry_count = getattr(self, retry_key, 0)
+                    if retry_count < 2:
+                        setattr(self, retry_key, retry_count + 1)
+                        logger.warning(f"QC FAIL [{display_name}] retry {retry_count+1}/2: {qc['reasons']}")
+                        current_feedback = "【质量检查不通过，请重新生成】\n" + "\n".join(qc["reasons"])
+                        continue
+                    else:
+                        logger.error(f"QC FAIL [{display_name}] after 2 retries, proceeding with degraded quality")
+                        await self.ws.send_message(project_name, {
+                            "type": "qc_warning",
+                            "phase_index": phase_index,
+                            "chunk_name": display_name,
+                            "reasons": qc["reasons"],
+                        })
 
             try:
                 log = extract_continuity(chunk_output, None)
@@ -1423,6 +2202,26 @@ class AsyncOrchestrator:
             # 持久化逐集审核状态（刷新后可恢复）
             project.set_pending_episode(phase_index, ci, display_name, chunk_count, chunk_files=[chunk_fname])
 
+            # StoryBible: 每 N 集更新一次全局故事圣经
+            if should_update_bible(ci + 1) and hasattr(agent, 'llm'):
+                try:
+                    blocks_with_output = sorted(
+                        [b for b in iterator.blocks if b.get("_output")],
+                        key=lambda b: b["index"]
+                    )
+                    recent_eps = [(b["name"], b["_output"]) for b in blocks_with_output[-BIBLE_UPDATE_INTERVAL:]]
+                    if len(recent_eps) >= 2:
+                        existing = load_bible(project.project_dir)
+                        loop = asyncio.get_event_loop()
+                        updated = await loop.run_in_executor(
+                            None, build_bible_update, agent.llm, project.project_dir, recent_eps, existing
+                        )
+                        if updated:
+                            save_bible(project.project_dir, updated)
+                            logger.info(f"StoryBible 已更新（第 {ci + 1} 集后）")
+                except Exception as e:
+                    logger.warning(f"StoryBible 更新异常: {e}")
+
             # 通知前端并等待审核
             await self.ws.send_message(project_name, {
                 "type": "chunk_saved",
@@ -1433,6 +2232,15 @@ class AsyncOrchestrator:
                 "file_path": chunk_fname,
             })
 
+            # 流水线：剧情阶段完成 N 个 chunk 后自动启动剧本生成
+            if phase_index == 2 and not self._screenplay_pipeline_task:
+                completed_chunks = ci + 1 - start_ci
+                if completed_chunks >= self._screenplay_trigger_count:
+                    self._screenplay_pipeline_task = asyncio.create_task(
+                        self._run_screenplay_pipeline(project, project_name, style)
+                    )
+                    logger.info(f"流水线: 剧情已完成 {completed_chunks} chunk，启动剧本并行生成")
+
             ep_result = await self.ws.wait_for_episode_approval(
                 project_name, phase_index, display_name, ci, chunk_count
             )
@@ -1440,6 +2248,33 @@ class AsyncOrchestrator:
             if action == "approve":
                 ci += 1
                 current_feedback = ""
+
+                # 每10集结构性质检（仅剧情阶段）：对比大纲全文检查角色消失/冲突跑偏
+                if "完整剧情" in output_path and ci >= 10 and ci % 10 == 0 and ci < chunk_count:
+                    ck_key = ci // 10
+                    if ck_key not in getattr(self, '_cp_rewound', set()):
+                        passed, restart_ci, reason = await _run_checkpoint_qc(
+                            agent, loop, input_content, iterator, ci,
+                            rewind_count=sum(1 for k in getattr(self, '_cp_rewound', set()) if k == ck_key)
+                        )
+                        if not passed:
+                            logger.warning(f"CheckpointQC [{ci}/{chunk_count}] FAIL → restart ep{restart_ci+1}: {reason[:80]}")
+                            if not hasattr(self, '_cp_rewound'):
+                                self._cp_rewound = set()
+                            self._cp_rewound.add(ck_key)
+                            for bi in range(restart_ci, len(iterator.blocks)):
+                                iterator.blocks[bi].pop("_output", None)
+                                iterator.blocks[bi].pop("_summary", None)
+                            if hasattr(self, '_screenplay_processed'):
+                                for bi in range(restart_ci, len(iterator.blocks)):
+                                    self._screenplay_processed.discard(iterator.blocks[bi]["name"])
+                            ci = restart_ci
+                            current_feedback = (
+                                f"【结构检查不通过·从第{restart_ci+1}集重写】{reason}\n"
+                                f"大纲中的所有角色必须出场，核心冲突不能偏离，剧情方向必须与大纲一致。"
+                            )
+                            continue
+
             elif action == "confirm":
                 project.clear_pending_episode()
                 if ci < chunk_count - 1:

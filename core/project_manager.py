@@ -70,11 +70,17 @@ class ProjectManager:
             "auto_approve": False,
         }
 
+    def _ensure_config_saved(self):
+        if not self.config_file.exists():
+            self.save_config()
+
     def save_config(self):
         self.config["updated_at"] = datetime.now().isoformat()
         self.project_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.config_file, "w", encoding="utf-8") as f:
+        tmp = self.config_file.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.config, f, ensure_ascii=False, indent=2)
+        tmp.replace(self.config_file)
 
     def mark_phase_done(self, phase_index: int):
         if 0 <= phase_index < len(self.config["phases"]):
@@ -127,6 +133,7 @@ class ProjectManager:
         self.save_config()
 
     def write_output(self, filename: str, content: str) -> Path:
+        self._ensure_config_saved()
         file_path = self.project_dir / filename
         file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "w", encoding="utf-8") as f:

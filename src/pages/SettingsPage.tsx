@@ -112,6 +112,7 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    if (activeTab >= 3) return
     fetchAggConfigsAndModels()
     const provId = activeTab === 0 ? 'deepseek' : activeTab === 1 ? 'seedream' : 'seedance'
     fetchProviderConfigs(provId).then(d => setProviderConfigMap(prev => ({ ...prev, [provId]: d.configs })))
@@ -183,13 +184,13 @@ export default function SettingsPage() {
     setTesting(false)
   }
 
-  const grp = GROUPS[activeTab]
+  const grp = GROUPS[activeTab >= 3 ? 0 : activeTab]
 
   return (
     <div className="min-h-screen relative overflow-hidden">
       <Starfield />
 
-      <div className="max-w-5xl mx-auto px-6 py-10 relative z-10">
+      <div className="max-w-5xl mx-auto px-6 py-10 pb-20 relative z-10">
         <button onClick={() => navigate('/home')} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground mb-8 transition-colors">
           <ArrowLeft className="w-4 h-4" /> 返回首页
         </button>
@@ -210,7 +211,8 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {/* Provider cards */}
+        {/* Content tabs */}
+        {activeTab < 3 && (
         <div className="animate-fade-in-up" key={activeTab}>
           <div className="mb-3 flex items-center gap-2 mt-8">
             <h3 className="premium-label">🔑 官网 API</h3>
@@ -630,6 +632,7 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+        )}
 
         {/* Save bar */}
         <div className="sticky bottom-6 premium-subpanel p-4 flex items-center justify-between">

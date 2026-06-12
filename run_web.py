@@ -66,7 +66,15 @@ def start_server():
 
     threading.Thread(target=open_browser, daemon=True).start()
     time.sleep(0.5)
-    uvicorn.run("server.app:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(
+        "server.app:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        timeout_keep_alive=1800,
+        ws_ping_interval=120,
+        ws_ping_timeout=1800,
+    )
 
 
 if __name__ == "__main__":

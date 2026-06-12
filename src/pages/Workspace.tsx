@@ -64,7 +64,7 @@ export default function Workspace() {
   const streamHadContent = useRef(false)
   const lastStreamUpdate = useRef(0)
 
-  const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, chunksCompleted, error, episodeConfirm, episodeApprove, episodeRevise, awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase, pausedPhaseIndex } = useWebSocket()
+  const { connect, send, approve, revise, reject, confirmPhase, proceedGeneration, selectVersion, disconnect, clearStream, connected, streamContent, currentPhase, phases, progress, awaitingApproval, awaitingVersion, awaitingProceed, contentWarnings, isComplete, streamDone, chunksCompleted, error, episodeConfirm, episodeApprove, episodeRevise, awaitingEpisodeApproval, currentEpisode, confirmedPhaseIndex, clearConfirmedPhase, pausedPhaseIndex, autoDuration, confirmAutoDuration } = useWebSocket()
 
 
   useEffect(() => {
@@ -119,7 +119,14 @@ export default function Workspace() {
         setStarted(true)
         connect(name)
         setPendingContinue(true)
+      } else if (phs.some((p: any) => p.done)) {
+        // 有已完成阶段，连接 WS 以便查看内容或继续创作
+        setStarted(true)
+        connect(name)
       }
+    }).catch(() => {
+      setStarted(true)
+      connect(name)
     })
   }, [name])
 
@@ -173,11 +180,11 @@ export default function Workspace() {
 
   useEffect(() => {
     if (continuing) {
-      if (connected || currentPhase >= 0 || streamContent) {
+      if (currentPhase >= 0 && connected) {
         setContinuing(false)
       }
     }
-  }, [continuing, connected, currentPhase, streamContent])
+  }, [continuing, currentPhase, connected])
 
   useEffect(() => {
     if (!streamContent) { setStreamChars(0); return }
@@ -233,25 +240,14 @@ export default function Workspace() {
   const handleStart = () => { if (!name) return; connect(name); setStarted(true); setPendingStart(true) }
   const handleContinue = () => {
     if (!name) return
-    if (!connected) { connect(name); setPendingContinue(true); return }
     setContinuing(true)
     setViewContent('')
     setSelectedPhase(-1)
+    setViewMode('stream')
     setStarted(true)
-    send({ action: 'continue', style: {
-        story_type: projectConfig.style_type || '',
-        genre: projectConfig.genre || '',
-        writing_style: projectConfig.writing_style || '',
-        visual_style: projectConfig.visual_style || '',
-        art_style: projectConfig.art_style || '',
-        screen_aspect: projectConfig.screen_aspect || '',
-        script_style: projectConfig.script_style || '',
-        duration_mode: projectConfig.duration_mode || '',
-        episode_count: projectConfig.episode_count || '',
-        episode_duration: projectConfig.episode_duration || '',
-        custom_requirements: projectConfig.custom_requirements || '', visual_reference: projectConfig.visual_reference || '',
-        action_reference: projectConfig.action_reference || '',
-      }})
+    setProjectRunning(true)
+    setPendingContinue(true)
+    if (!connected) connect(name)
   }
   const handleResumeGeneration = () => {
     if (!name) return
@@ -420,10 +416,11 @@ export default function Workspace() {
   }
 
   const handleViewAct = async (phaseIndex: number, actFileName: string) => {
-    setSelectedAct(actFileName); setViewContent(''); setLoadingPhase(true)
+    setSelectedPhase(phaseIndex); setSelectedAct(actFileName); setViewContent(''); setLoadingPhase(true)
+    if (viewMode === 'stream') setViewMode('history')
     try {
-      const actPath = actFileName && actFileName.includes('/')
-        ? `${PHASE_DIRS[phaseIndex]}/${actFileName}`
+      const actPath = actFileName.startsWith(PHASE_DIRS[phaseIndex] + '/') || actFileName.startsWith(PHASE_DIRS[phaseIndex] + '\\')
+        ? actFileName
         : (actFileName ? `${PHASE_DIRS[phaseIndex]}/${actFileName}` : PHASE_DIRS[phaseIndex])
       const c = await fetchPhaseContent(projectConfig?.name, actPath)
       setViewContent(c.content || '')
@@ -433,7 +430,7 @@ export default function Workspace() {
 
   const phaseNames = getPhaseNames(projectConfig?.style_type)
   const allDone = (projectConfig?.phases || []).filter((p: any) => p.done).length >= phaseNames.length
-  const isGeneratingStream = connected && (streamContent || projectRunning)
+  const isGeneratingStream = connected && (streamContent || projectRunning || (currentPhase >= 0 && !streamDone))
 
   return (
     <div className="flex h-screen relative overflow-hidden">
@@ -512,7 +509,7 @@ export default function Workspace() {
                   </>
                 )}
                 {projectConfig?.style_type === '4' && (
-                  <a href={`/api/projects/${encodeURIComponent(name!)}/export-novel`} target="_blank" rel="noopener noreferrer"
+                  <a href={`/api/projects/${encodeURIComponent(name!)}/export-novel`}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border text-sm transition-all"
                     style={{ borderColor: 'rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.75)' }}
                     onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.30)' }}
@@ -522,7 +519,7 @@ export default function Workspace() {
                   </a>
                 )}
                 {currentPhase >= 0 && PHASE_DIRS[currentPhase] && (
-                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[currentPhase]}/export-docx`} target="_blank" rel="noopener noreferrer"
+                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[currentPhase]}/export-docx`}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium transition-all"
                     style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
                     onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.25)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.45)' }}
@@ -580,7 +577,7 @@ export default function Workspace() {
               )}
             </div>
           </div>
-        ) : (connected && currentPhase >= 0 && isGeneratingStream) || (connected && currentPhase >= 0 && viewContent) ? (
+        ) : (connected && currentPhase >= 0 && isGeneratingStream) || (connected && currentPhase >= 0 && viewContent) || (connected && projectRunning && currentPhase >= 0) ? (
           <>
             {isGeneratingStream && (
               <div style={{ display: viewMode === 'stream' ? undefined : 'none' }} className="flex-1 flex flex-col overflow-hidden">
@@ -966,7 +963,7 @@ export default function Workspace() {
                       )}
                     </>
                   )}
-                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[selectedPhase]}/export-docx`} target="_blank" rel="noopener noreferrer"
+                  <a href={`/api/projects/${encodeURIComponent(name!)}/${PHASE_DIRS[selectedPhase]}/export-docx`}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
                     style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: 'rgba(147,197,253,0.85)' }}
                     onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.22)'; e.currentTarget.style.borderColor = 'rgba(59,130,246,0.40)' }}
@@ -1255,6 +1252,29 @@ export default function Workspace() {
             )}
            </div>
            </>
+         ) : connected && viewContent && selectedPhase >= 0 ? (
+           <div className="flex-1 flex flex-col overflow-hidden">
+             <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
+               <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+                 <div className="flex items-center gap-2 text-sm">
+                   <span>{PHASE_ICONS[selectedPhase] || '📝'}</span>
+                   <span className="font-medium">{getPhaseNames(projectConfig?.style_type)[selectedPhase] || ''}</span>
+                   <span className="text-xs text-muted-foreground ml-2">({viewContent.length} 字)</span>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <button onClick={() => { setSelectedPhase(-1); setViewContent(''); setActFileList([]); setViewMode('stream') }}
+                     className="px-3 py-1.5 rounded-xl text-xs transition-all" style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)' }}>
+                     ✕ 关闭
+                   </button>
+                 </div>
+               </div>
+             </div>
+             <div className="flex-1 overflow-y-auto p-10">
+               <div className="max-w-5xl mx-auto premium-inset p-6">
+                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewContent}</ReactMarkdown>
+               </div>
+             </div>
+           </div>
          ) : continuing ? (
            <div className="flex-1 flex flex-col overflow-hidden">
              <div className="border-b border-border/30 bg-card/40 backdrop-blur-sm px-8 py-3">
@@ -1369,6 +1389,31 @@ export default function Workspace() {
             </div>
           </div>
         )}
+      {autoDuration && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="premium-panel p-8 rounded-2xl max-w-lg w-full mx-4" style={{ background: 'rgba(15,15,25,0.95)', border: '1px solid rgba(167,139,250,0.25)' }}>
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'rgba(255,255,255,0.90)' }}>自动时长分析结果</h3>
+            <div className="mb-4 text-sm" style={{ color: 'rgba(255,255,255,0.50)' }}>
+              类型：{autoDuration.type_name} / 单集：{autoDuration.per_ep}
+            </div>
+            <div className="mb-1 text-sm font-medium" style={{ color: 'rgba(167,139,250,0.90)' }}>
+              建议 {autoDuration.count} 集
+            </div>
+            <div className="mb-4 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{autoDuration.reasoning}</div>
+            <div className="mb-4 max-h-48 overflow-y-auto space-y-1">
+              {autoDuration.episodes.map((ep: string, i: number) => (
+                <div key={i} className="text-xs py-1 px-2 rounded" style={{ color: 'rgba(255,255,255,0.55)', background: 'rgba(255,255,255,0.04)' }}>{ep}</div>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => confirmAutoDuration(autoDuration.count, autoDuration.per_ep)}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all btn-gradient">
+                确认 ({autoDuration.count}集 × {autoDuration.per_ep})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   )

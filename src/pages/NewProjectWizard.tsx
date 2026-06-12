@@ -66,6 +66,8 @@ export default function NewProjectWizard() {
       console.error('获取模型失败:', err)
     })
     fetchTemplates().then(setTemplates).catch(() => {})
+    fetchSettings().then(data => {
+    }).catch(() => {})
     setTimeout(() => { staggerRef.current = true; setShowStagger(true) }, 80)
   }, [])
 
@@ -479,6 +481,7 @@ export default function NewProjectWizard() {
                   <textarea className="w-full premium-input rounded-xl px-4 py-3 h-32 resize-none text-xs"
                     placeholder="用一段话描述你想讲的故事..."
                     value={storyIdea} onChange={e => setStoryIdea(e.target.value)} />
+                  <p className="text-[10px] text-white/20 mt-1.5">💡 可选：在描述中加入「本剧氛围：冷调」或「本剧氛围：暖调」——不填则自动适配</p>
                 </div>
                 <div>
                   <label className="text-[11px] text-white/30 block mb-2">额外要求（可选）</label>

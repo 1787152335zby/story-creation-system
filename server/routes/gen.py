@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
-import os, json, uuid, time, requests, shutil, threading
+import os, json, uuid, time, requests, shutil, threading, subprocess
 from tools.video_api_seedance import SeedanceBackend
 from tools.video_api import create_video_backend
 from PIL import Image, ImageDraw, ImageFont
@@ -1975,3 +1975,13 @@ def modify_asset_endpoint(
         "supports_img2img": True
     }
     return result
+
+
+@router.post("/media/open-folder")
+def open_media_folder():
+    """Open the generated images/videos folder in file explorer."""
+    try:
+        subprocess.Popen(["explorer", str(GENERATED_DIR)])
+        return {"opened": True, "path": str(GENERATED_DIR)}
+    except Exception as e:
+        return {"opened": False, "error": str(e)}

@@ -18,6 +18,7 @@ export interface StyleConfig {
   visual_reference: string
   action_reference: string
   mood: string
+  writer_mode?: string
 }
 
 export interface CreateProjectPayload {
@@ -65,6 +66,7 @@ export interface SettingsData {
   banana2_api_key: string
   banana2_base_url: string
   banana2_model: string
+  writer_mode: string
 }
 
 export async function fetchProjects(): Promise<ProjectInfo[]> {
@@ -160,6 +162,11 @@ export async function generateRandomIdea(style: StyleConfig, signal?: AbortSigna
 export async function openProjectFolder(name: string, subfolder?: string): Promise<{ opened: boolean; path?: string }> {
   const params = subfolder ? `?subfolder=${encodeURIComponent(subfolder)}` : ''
   const res = await fetch(`${BASE}/projects/${encodeURIComponent(name)}/open${params}`, { method: 'POST' })
+  return res.json()
+}
+
+export async function openGeneratedFolder(): Promise<{ opened: boolean; path?: string }> {
+  const res = await fetch(`${BASE}/media/open-folder`, { method: 'POST' })
   return res.json()
 }
 

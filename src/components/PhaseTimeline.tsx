@@ -96,28 +96,35 @@ export default function PhaseTimeline({
           const s = phaseStatus(i)
           const isSelected = selectedPhase === i
           const canView = s === 'done'
-          const hasActs = isSelected && actFileList.length > 1
           const chunkList = chunksCompleted[i]
+          const hasChunks = chunkList && chunkList.length > 0
+          const isActiveWithChunks = s === 'active' && hasChunks
+          const hasPartialChunks = s === 'pending' && hasChunks
+          const clickable = canView || isActiveWithChunks || hasPartialChunks
+          const hasActs = isSelected && actFileList.length > 1
           return (
             <div key={i} className="animate-fade-in-up" style={{ animationDelay: `${i * 0.06}s`, opacity: 0 }}>
               <button
-                onClick={() => { if (canView) { onViewPhase(i); onSetExpandedPhase(expandedPhase === i ? -1 : i) } }}
-                disabled={!canView}
+                onClick={() => {
+                  if (canView) { onViewPhase(i); onSetExpandedPhase(expandedPhase === i ? -1 : i) }
+                  else if (isActiveWithChunks || hasPartialChunks) { onSetExpandedPhase(expandedPhase === i ? -1 : i) }
+                }}
+                disabled={!clickable}
                 className={`group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-200`}
                 style={{
                   background: isSelected ? 'rgba(167,139,250,0.10)' : s === 'active' ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  borderLeft: s === 'done' ? '2px solid rgba(74,222,128,0.4)' : s === 'active' ? '2px solid rgba(167,139,250,0.6)' : '2px solid transparent',
-                  color: isSelected ? 'rgba(255,255,255,0.95)' : s === 'active' ? 'rgba(255,255,255,0.85)' : s === 'done' ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.40)',
+                  borderLeft: s === 'done' ? '2px solid rgba(74,222,128,0.4)' : (s === 'active' || hasPartialChunks) ? '2px solid rgba(167,139,250,0.6)' : '2px solid transparent',
+                  color: isSelected ? 'rgba(255,255,255,0.95)' : s === 'active' ? 'rgba(255,255,255,0.85)' : s === 'done' ? 'rgba(255,255,255,0.75)' : hasPartialChunks ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.40)',
                   fontWeight: isSelected || s === 'active' ? 500 : 400,
-                  cursor: canView ? 'pointer' : 'default'
+                  cursor: clickable ? 'pointer' : 'default'
                 }}
                 onMouseOver={(e) => {
-                  if (s === 'done' && !isSelected) {
+                  if ((s === 'done' || isActiveWithChunks || hasPartialChunks) && !isSelected) {
                     e.currentTarget.style.background = 'rgba(255,255,255,0.07)';
                   }
                 }}
                 onMouseOut={(e) => {
-                  if (!isSelected && s !== 'active') {
+                  if (!isSelected && s !== 'active' && !isActiveWithChunks && !hasPartialChunks) {
                     e.currentTarget.style.background = 'transparent';
                   }
                 }}
@@ -126,10 +133,16 @@ export default function PhaseTimeline({
                 <span className="flex-1">{pname}</span>
                 {s === 'active' && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 animate-ping" style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(265, 87%, 60%))' }} />}
                 {s === 'done' && <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
-                {s !== 'active' && s !== 'done' && chunksCompleted[i]?.length > 0 && (
+                {s !== 'active' && s !== 'done' && hasPartialChunks && (
                   <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 )}
-                {canView && (isSelected && hasActs ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-60 flex-shrink-0 transition-opacity" />)}
+                {canView && !hasChunks && <Eye className="w-3.5 h-3.5 opacity-0 group-hover:opacity-60 flex-shrink-0 transition-opacity" />}
+                {(canView && hasChunks) && (
+                  expandedPhase === i ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 opacity-40 flex-shrink-0 rotate-[-90deg]" />
+                )}
+                {(isActiveWithChunks || hasPartialChunks) && (
+                  expandedPhase === i ? <ChevronDown className="w-3.5 h-3.5 opacity-60 flex-shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 opacity-40 flex-shrink-0 rotate-[-90deg]" />
+                )}
                 {s === 'done' && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRedo(i) }}
@@ -144,12 +157,13 @@ export default function PhaseTimeline({
                 )}
               </button>
 
-              {chunkList && chunkList.length > 0 && (
+              {(chunkList && chunkList.length > 0) && expandedPhase === i && (
                 <div className="ml-8 mt-0.5 mb-1 pl-3 animate-fade-in" style={{ borderLeft: '2px solid rgba(74,222,128,0.3)' }}>
                   {chunkList.map((ch, ci) => {
                     const isCurrentChunk = currentEpisode && currentEpisode.phase_index === i && currentEpisode.chunk_index === ch.index
                     return (
-                      <div key={ci} className="text-[10px] py-0.5 flex items-center gap-1" style={{
+                      <button key={ci} onClick={() => onViewAct(i, ch.filePath || ch.name)}
+                        className="w-full text-left text-[10px] py-0.5 flex items-center gap-1 hover:bg-white/[0.04] rounded transition-colors" style={{
                         color: isCurrentChunk ? 'rgba(255,255,255,0.85)' : 'rgba(74,222,128,0.70)',
                       }}>
                         <span className="w-1 h-1 rounded-full flex-shrink-0" style={{
@@ -159,7 +173,7 @@ export default function PhaseTimeline({
                         {isCurrentChunk && (
                           <span className="animate-pulse text-[9px]" style={{ color: 'hsl(var(--primary))' }}>生成中</span>
                         )}
-                      </div>
+                      </button>
                     )
                   })}
                 </div>

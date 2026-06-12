@@ -77,3 +77,10 @@ dist-electron/
 build-backend/
 *.spec.bak
 .codegraph/
+
+# Temp test artifacts / screenshots / prototypes
+_*.md
+_*_shots/
+*.png
+workspace-prototype.html
+workspace-v*.html

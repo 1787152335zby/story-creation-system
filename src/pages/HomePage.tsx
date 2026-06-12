@@ -7,6 +7,7 @@ import { fetchProjects, deleteProject, openProjectFolder, renameProject, fetchPr
 import { useToast } from '../components/Toast'
 import type { ProjectInfo } from '../lib/types'
 import { getPhaseNames } from '../lib/constants'
+import { useProjectRefresh } from '../hooks/useProjectRefresh'
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -35,11 +36,7 @@ export default function HomePage() {
 
   useEffect(() => { load() }, [])
 
-  useEffect(() => {
-    if (!projects.some(p => p.running)) return
-    const timer = setInterval(() => { fetchProjects().then(setProjects).catch(() => {}) }, 3000)
-    return () => clearInterval(timer)
-  }, [projects])
+  useProjectRefresh(projects.some(p => p.running), setProjects)
 
   const handleRename = async (old: string) => {
     if (!renameInput.trim() || renameInput.trim() === old) { setRenaming(null); return }
@@ -274,7 +271,6 @@ export default function HomePage() {
                   ))}
                 </div>
                 <a href={`/api/projects/${encodeURIComponent(exportTarget)}/export-batch?phases=${encodeURIComponent([...selectedPhases].join(','))}`}
-                  target="_blank" rel="noopener noreferrer"
                   className={`flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-xs font-medium transition-all ${selectedPhases.size === 0 ? 'pointer-events-none opacity-30' : ''}`}
                   style={{ background: 'rgba(59,130,246,0.20)', border: '1px solid rgba(59,130,246,0.30)', color: 'rgba(147,197,253,0.90)' }}
                   onClick={() => { setTimeout(() => setExportTarget(null), 500) }}>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Sparkles, Loader2, Download, Trash2 } from 'lucide-react'
-import { fetchProjects, fetchCharacters, fetchScenes, fetchProps, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, fetchGenerationHistoryItem, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion, uploadReferenceImage, generateSelectionPrompt, fetchConfirmedImages, fetchImagePresets, fetchCharacterPrompt, fetchCharacterConfirmedImages, fetchScenePrompt, fetchSceneConfirmedImages, fetchPropPrompt, getModelCapability } from '../lib/api'
+import { ArrowLeft, Sparkles, Loader2, Download, Trash2, FolderOpen } from 'lucide-react'
+import { fetchProjects, fetchCharacters, fetchScenes, fetchProps, freeImageGen, fetchImageResolutions, fetchActiveConfig, fetchGenerationHistory, fetchGenerationHistoryItem, deleteGeneratedFile, fetchProjectImages, confirmVersion, deleteVersion, uploadReferenceImage, generateSelectionPrompt, fetchConfirmedImages, fetchImagePresets, fetchCharacterPrompt, fetchCharacterConfirmedImages, fetchScenePrompt, fetchSceneConfirmedImages, fetchPropPrompt, getModelCapability, openGeneratedFolder } from '../lib/api'
 import FreeImageGenForm from '../components/FreeImageGenForm'
 import ProjectImageGenForm from '../components/ProjectImageGenForm'
 import ImagePreview from '../components/ImagePreview'
@@ -460,6 +460,11 @@ export default function ImageGenPage() {
             </div>
           </button>
         </div>
+
+        <button onClick={() => { openGeneratedFolder(); toast('正在打开文件夹', 'info') }}
+          className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/55 transition-colors mb-4">
+          <FolderOpen className="w-3 h-3" /> 打开图片文件夹
+        </button>
 
         {mode === 'free' ? (
           <FreeImageGenForm

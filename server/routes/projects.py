@@ -5,8 +5,16 @@ import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
+
+_NAME_NOISE = {
+    '照片','背影','人影','扉页','结果','字迹','供体','男人','女人',
+    '第一张','第二张','第三张','第四张','第五张','第六张','第七张',
+    '男声','女声','旁白','屏幕','字幕',
+}
+
+
 def _natsort_key(path):
-    name = path.name
+    name = path.as_posix()
     nums = re.findall(r'\d+', name)
     return (0, int(nums[0])) if nums else (1, name)
 from ..schemas import CreateProjectRequest, StyleConfigRequest
@@ -42,18 +50,37 @@ def _build_project_list() -> list:
         if item.is_dir():
             config_file = item / "project_config.json"
             if config_file.exists():
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config = json.load(f)
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                except Exception:
+                    continue
                 config["total_phases"] = len(config.get("phases", []))
                 config["pending_episode"] = config.get("pending_episode", False)
                 config["running"] = config.get("name", "") in running_set
                 projects.append(config)
     return sorted(projects, key=lambda p: p.get("updated_at", ""), reverse=True)
 
+_cached_list: tuple = None
+
+def _invalidate_cache():
+    global _cached_list
+    _cached_list = None
+
+def _get_cached_project_list() -> list:
+    global _cached_list
+    import time
+    now = time.time()
+    if _cached_list and now - _cached_list[0] < 2:
+        return _cached_list[1]
+    result = _build_project_list()
+    _cached_list = (now, result)
+    return result
+
 
 @router.get("/projects")
 def list_projects():
-    return _build_project_list()
+    return _get_cached_project_list()
 
 
 @router.get("/projects/{name}")
@@ -209,178 +236,13 @@ def _is_dialogue_line(text: str) -> bool:
     return bool(text) and (text[0] == '"' or text[0] == '\u201c' or text[0] == '\u2018')
 
 
-def _system_script_to_market(text: str) -> str:
-    lines = text.split('\n')
-    out = []
-    ep_num = 0
-    scene_num = 0
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-
-        m = re.match(r'^#{1,3}\s*第(\d+)集', stripped)
-        if m:
-            ep_num = int(m.group(1))
-            scene_num = 0
-            out.append(f'第{ep_num}集')
-            out.append('')
-            i += 1
-            continue
-
-        m = re.match(r'^###\s*第(\d+)场\s*[-—]\s*(.+)$', stripped)
-        if m:
-            scene_num = int(m.group(1))
-            location_full = m.group(2).strip()
-            parts = re.split(r'\s*[·•]\s*', location_full, maxsplit=1)
-            location = parts[0]
-            time_str = parts[1] if len(parts) > 1 else '白天'
-            out.append(f'{ep_num}-{scene_num} {time_str} 内 {location}')
-            out.append('')
-            i += 1
-            continue
-
-        if stripped.startswith('出场角色：'):
-            content = stripped[len('出场角色：'):]
-            out.append(f'出场人物：{content}')
-            out.append('')
-            i += 1
-            continue
-
-        if stripped == '---':
-            out.append('')
-            i += 1
-            continue
-
-        if not stripped:
-            out.append('')
-            i += 1
-            continue
-
-        if stripped.startswith('#') or stripped.startswith('▶'):
-            out.append(stripped)
-            i += 1
-            continue
-
-        j, merged = _try_merge_dialogue(lines, i, stripped)
-        if merged:
-            out.append(merged)
-            i = j
-            continue
-
-        if stripped.startswith('（'):
-            j, merged = _try_merge_multiline_action(lines, i)
-            if merged:
-                out.append(merged)
-                i = j
-                continue
-            if stripped.endswith('）'):
-                action = stripped[1:-1]
-                out.append(f'▶ {action}')
-                i += 1
-                continue
-
-        out.append(stripped)
-        i += 1
-
-    return '\n'.join(out)
+def _strip_quotes(s):
+    q = s.strip()
+    while q and q[0] in '"\u201c\u2018"' and q[-1] in '"\u201d\u2019"':
+        q = q[1:-1].strip()
+    return q
 
 
-def _try_merge_dialogue(lines, i, stripped):
-    inline_emotion = re.match(r'^(.+?)（(.+?)）$', stripped)
-    if inline_emotion:
-        char_name = inline_emotion.group(1)
-        emotion1 = inline_emotion.group(2)
-        j = i + 1
-        emotion2 = ''
-        if j < len(lines) and lines[j].strip().startswith('（') and lines[j].strip().endswith('）'):
-            emotion2 = lines[j].strip()[1:-1]
-            j += 1
-        if j < len(lines) and _is_dialogue_line(lines[j].strip()):
-            dialogue = lines[j].strip()
-            j += 1
-            full_emotion = f'{emotion1}，{emotion2}' if emotion2 else emotion1
-            return j, f'{char_name}（{full_emotion}）：{dialogue}'
-        return i, None
-
-    j = i + 1
-    emotion = ''
-    if j < len(lines) and lines[j].strip().startswith('（') and lines[j].strip().endswith('）'):
-        emotion = lines[j].strip()[1:-1]
-        j += 1
-    if j < len(lines) and _is_dialogue_line(lines[j].strip()):
-        dialogue = lines[j].strip()
-        j += 1
-        if emotion:
-            return j, f'{stripped}（{emotion}）：{dialogue}'
-        else:
-            return j, f'{stripped}：{dialogue}'
-
-    return i, None
-
-
-def _try_merge_multiline_action(lines, i):
-    stripped = lines[i].strip()
-    if not stripped.startswith('（'):
-        return i, None
-    if stripped.endswith('）'):
-        return i, None
-    j = i + 1
-    while j < len(lines):
-        ls = lines[j].strip()
-        if not ls:
-            j += 1
-            continue
-        if _is_dialogue_line(ls) or re.match(r'^#{1,3}\s', ls) or re.match(r'^出场角色：', ls) or ls == '---':
-            return i, None
-        if ls.endswith('）'):
-            part = stripped[1:]
-            for k in range(i + 1, j):
-                if lines[k].strip():
-                    part += lines[k].strip()
-            part += ls[:-1]
-            return j + 1, f'▶ {part}'
-        j += 1
-    return i, None
-
-
-def _market_to_html(text: str) -> str:
-    lines = text.split('\n')
-    out_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            out_lines.append('<br/>')
-            continue
-        if re.match(r'^第\d+集$', stripped):
-            out_lines.append(f'<h2>{stripped}</h2>')
-            continue
-        if re.match(r'^\d+-\d+\s+', stripped):
-            out_lines.append(f'<h3>{stripped}</h3>')
-            continue
-        if stripped.startswith('出场人物：'):
-            out_lines.append(f'<p><b>{stripped}</b></p>')
-            continue
-        out_lines.append(f'<p>{stripped}</p>')
-    return '\n'.join(out_lines)
-
-
-def _should_use_market_format(project_dir: Path, phase_or_path: str) -> bool:
-    config_file = project_dir / "project_config.json"
-    if not config_file.exists():
-        return False
-    try:
-        cfg = json.loads(config_file.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    if cfg.get("script_format", "1") != "2":
-        return False
-    path_lower = phase_or_path.lower().replace('\\', '/')
-    is_script = '剧本' in path_lower or '03_' in path_lower or 'script' in path_lower
-    return is_script
-
-
-@router.get("/projects/{name}/{phase:path}/export-docx")
 def export_phase_docx(name: str, phase: str):
     from fastapi.responses import Response
     project_dir = PROJECTS_DIR / name
@@ -401,12 +263,7 @@ def export_phase_docx(name: str, phase: str):
     else:
         full_text = phase_path.read_text(encoding="utf-8")
 
-    use_market = _should_use_market_format(project_dir, phase)
-    if use_market:
-        full_text = _system_script_to_market(full_text)
-        html_body = _market_to_html(full_text)
-    else:
-        html_body = _md_to_html(full_text)
+    html_body = _md_to_html(full_text)
     display_name = phase.rstrip("/").replace("\\", "/").split("/")[-1]
 
     docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -469,12 +326,7 @@ def export_project_batch(name: str, phases: str = ""):
         else:
             text = phase_path.read_text(encoding="utf-8")
 
-        use_market = _should_use_market_format(project_dir, phase)
-        if use_market:
-            text = _system_script_to_market(text)
-            phase_html = _market_to_html(text)
-        else:
-            phase_html = _md_to_html(text)
+        phase_html = _md_to_html(text)
 
         import re as _re
         phase_label = _re.sub(r'^\d+_', '', phase)
@@ -557,7 +409,7 @@ def list_project_phases(name: str):
             if content_count == 0 and not any(True for _ in d.rglob("*.png")):
                 continue
             phase_files = []
-            for mf in sorted(md_files):
+            for mf in sorted(md_files, key=lambda mf: _natsort_key(mf.relative_to(d))):
                 if mf.name.startswith("分镜提示词"):
                     continue
                 rel = mf.relative_to(d).as_posix()
@@ -591,12 +443,7 @@ def export_single_file(name: str, phase: str = "", file: str = ""):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     text = file_path.read_text(encoding="utf-8")
-    use_market = _should_use_market_format(project_dir, phase)
-    if use_market:
-        text = _system_script_to_market(text)
-        html_body = _market_to_html(text)
-    else:
-        html_body = _md_to_html(text)
+    html_body = _md_to_html(text)
 
     docx_html = f"""<html xmlns:o="urn:schemas-microsoft-com:office:office"
 xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -616,7 +463,11 @@ li {{ margin-left: 20px; }}
 {html_body}
 </body></html>"""
     stem = file_path.stem
-    fn = f"{name}_{stem}.doc"
+    parent = file_path.parent.name if file_path.parent != phase_path else ""
+    if parent and parent != ".":
+        fn = f"{name}_{parent}_{stem}.doc"
+    else:
+        fn = f"{name}_{stem}.doc"
     return Response(
         content=docx_html.encode("utf-8"),
         media_type="application/msword",
@@ -641,15 +492,10 @@ def export_phase_all(name: str, phase: str = ""):
         raise HTTPException(status_code=404, detail="该阶段无内容")
 
     all_html: list[str] = []
-    use_market = _should_use_market_format(project_dir, phase)
-    for mf in sorted(md_files):
+    for mf in sorted(md_files, key=lambda mf: _natsort_key(mf.relative_to(phase_path))):
         rel = mf.relative_to(phase_path).as_posix()
         text = mf.read_text(encoding="utf-8")
-        if use_market:
-            text = _system_script_to_market(text)
-            all_html.append(f"<h2>{rel}</h2>\n{_market_to_html(text)}")
-        else:
-            all_html.append(f"<h2>{rel}</h2>\n{_md_to_html(text)}")
+        all_html.append(f"<h2>{rel}</h2>\n{_md_to_html(text)}")
 
     html_body = "\n<hr style='border:2px solid #333; margin:30px 0; page-break-after: always;'/>\n".join(all_html)
 
@@ -689,6 +535,7 @@ li {{ margin-left: 20px; }}
 
 @router.post("/projects")
 def create_project(req: CreateProjectRequest):
+    _invalidate_cache()
     from core.project_manager import ProjectManager
     from core.style_config import STORY_TYPES, WRITING_STYLES, VISUAL_STYLES, RENDER_STYLES, SCREEN_ASPECTS, SCRIPT_STYLES
 
@@ -770,7 +617,7 @@ def random_story_idea(style: StyleConfigRequest):
     aspect_name = SCREEN_ASPECTS.get(style.screen_aspect, {}).get("name", "未知")
     mood_name = style.mood or ""
 
-    prompt = f"""你是一位专业的故事策划师。请根据以下配置，创作一段50-100字的故事描述，作为{story_type_name}的创作起点。
+    prompt = f"""你是一位专业的故事策划师。请根据以下配置，创作一段100-200字的故事描述，作为{story_type_name}的创作起点。
 
 【故事类型】：{story_type_name}
 【题材风格】：{genre_name}
@@ -800,7 +647,7 @@ def random_story_idea(style: StyleConfigRequest):
    - 如果是对白驱动型，构思的矛盾应以人物对话为核心
    - 如果是画面感强，构思应着重视觉化的场景想象
 4. 必须包含：一个核心角色 + 一个明确的困境/冲突 + 一个独特的场景设定
-5. 语言简洁有力，50-100字
+5. 内容要充实，写出具体的场景细节、人物动作或情绪氛围，不要笼统概括。控制在100-200字
 6. 直接输出故事描述，不要任何额外说明和标记
 7. 每次生成都应该是全新的创意，避免套路化"""
 
@@ -834,6 +681,7 @@ def open_project_folder(name: str, subfolder: str = ""):
 
 @router.delete("/projects/{name}")
 def delete_project(name: str):
+    _invalidate_cache()
     import shutil
     project_dir = PROJECTS_DIR / name
     if not project_dir.exists():
@@ -1145,11 +993,12 @@ def update_project_config(name: str, body: dict):
     project = ProjectManager(name)
     project.config.update(body)
     project.save_config()
+    _invalidate_cache()
     return {"updated": True}
-
 
 @router.put("/projects/{name}/rename")
 def rename_project(name: str, body: dict):
+    _invalidate_cache()
     new_name = body.get("name", "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="新名称不能为空")

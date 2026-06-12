@@ -61,6 +61,7 @@ def _read_env() -> dict:
         "AGGREGATED_LLM_MODEL": "",
         "AGGREGATED_IMAGE_MODEL": "",
         "AGGREGATED_VIDEO_MODEL": "",
+        "WRITER_MODE": "full",
     }
     if ENV_PATH.exists():
         for line in ENV_PATH.read_text(encoding="utf-8").split("\n"):
@@ -97,6 +98,7 @@ def get_settings():
         "aggregated_llm_model": env.get("AGGREGATED_LLM_MODEL", ""),
         "aggregated_image_model": env.get("AGGREGATED_IMAGE_MODEL", ""),
         "aggregated_video_model": env.get("AGGREGATED_VIDEO_MODEL", ""),
+        "writer_mode": env.get("WRITER_MODE", "full"),
     }
 
 
@@ -125,6 +127,7 @@ def update_settings(req: SettingsUpdateRequest):
         "aggregated_llm_model": "AGGREGATED_LLM_MODEL",
         "aggregated_image_model": "AGGREGATED_IMAGE_MODEL",
         "aggregated_video_model": "AGGREGATED_VIDEO_MODEL",
+        "writer_mode": "WRITER_MODE",
     }
 
     for req_field, env_key in field_map.items():
@@ -166,6 +169,8 @@ def update_settings(req: SettingsUpdateRequest):
         f"AGGREGATED_LLM_MODEL={env.get('AGGREGATED_LLM_MODEL', '')}",
         f"AGGREGATED_IMAGE_MODEL={env.get('AGGREGATED_IMAGE_MODEL', '')}",
         f"AGGREGATED_VIDEO_MODEL={env.get('AGGREGATED_VIDEO_MODEL', '')}",
+        "",
+        f"WRITER_MODE={env.get('WRITER_MODE', 'full')}",
     ]
     try:
         ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -182,8 +187,7 @@ def categorize_model(model_id: str) -> str:
     """按模型名称关键词判断类型: llm / image / video。"""
     ml = model_id.lower()
     if any(x in ml for x in ["image", "mj_", "flux", "dall-e", "seedream", "kling-image",
-                              "wan2.7-image", "midjourney", "mj_imagine", "mj_upscale",
-                              "gemini"]) and "video" not in ml:
+                              "wan2.7-image", "midjourney", "mj_imagine", "mj_upscale"]) and "video" not in ml:
         return "image"
     if any(x in ml for x in ["video", "viduq", "veo", "kling-video", "sora", "seedance",
                               "i2v", "t2v", "happyhorse"]):
@@ -563,10 +567,9 @@ def get_aggregated_config_models(config_id: str):
             return {"families": []}
         model_ids = sorted([m.get("id", "") if isinstance(m, dict) else str(m) for m in items if m])
 
-        # 按配置类型过滤（image 只看生图模型, video 只看视频模型）
+        # 按配置类型过滤
         cfg_type = cfg.get("type", "llm")
-        if cfg_type != "llm":
-            model_ids = [m for m in model_ids if categorize_model(m) == cfg_type]
+        model_ids = [m for m in model_ids if categorize_model(m) == cfg_type]
 
         families = group_models_to_families(model_ids)
         return {"families": families}

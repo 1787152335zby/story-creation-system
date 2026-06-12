@@ -8,6 +8,12 @@ phases:
     condition: true
     auto_skip: false
 
+  - name: 节拍表
+    agent: story_engine
+    output: 01b_节拍表/
+    condition: "story_type in ['1']"
+    auto_skip: false
+
   - name: 完整剧情
     agent: plot_expander
     output: 02_完整剧情/

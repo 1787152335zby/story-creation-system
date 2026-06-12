@@ -112,21 +112,65 @@ class BibleFormatter:
         lines = []
         sorted_chars = sorted(bible.characters.items(), key=lambda x: x[1].last_seen_chapter, reverse=True)
         for name, entry in sorted_chars[:max_count]:
-            lines.append(f"- {name}: {entry.status}, {entry.cultivation}, 最后出场第{entry.last_seen_chapter}章")
+            parts = [f"- **{name}**: {entry.status}"]
+            if entry.last_seen_location:
+                parts.append(f"位于{entry.last_seen_location}")
+            parts.append(f"最后出场第{entry.last_seen_chapter}章")
+            if entry.arc:
+                parts.append(f"弧光: {entry.arc}")
+            lines.append(" / ".join(parts))
             if entry.relations:
                 lines.append(f"  关系: {'; '.join(entry.relations)}")
+            if entry.key_items:
+                lines.append(f"  物品: {'; '.join(entry.key_items)}")
             if entry.pending_hooks:
                 lines.append(f"  待收伏笔: {'; '.join(entry.pending_hooks)}")
         return "\n".join(lines)
 
     @staticmethod
-    def format_active_hooks(bible: NovelBible, max_count: int = 5) -> str:
+    def format_relationship_graph(bible: NovelBible) -> str:
+        """构建角色关系图谱（Mermaid 兼容文本）"""
+        lines = ["## 角色关系图谱\n"]
+        links = []
+        for name, entry in bible.characters.items():
+            for rel in entry.relations:
+                target = _extract_relation_target(rel, bible.characters.keys())
+                if target and name != target:
+                    links.append(f"  {name} --> {target}: {rel}")
+        if links:
+            lines.append("```mermaid\ngraph LR\n" + "\n".join(links[:30]) + "\n```")
+        return "\n".join(lines)
+
+    @staticmethod
+    def format_active_hooks(bible: NovelBible, max_count: int = 8) -> str:
         lines = []
         for h in bible.hooks:
             if h.status == "未收":
-                lines.append(f"- {h.description} (第{h.planted_at}章埋下)")
+                planted = h.planted_at
+                expect = h.expected_resolve or "待定"
+                lines.append(f"- 【{h.description}】埋于第{planted}章 → 预计回收: {expect}")
                 if len(lines) >= max_count:
                     break
+        return "\n".join(lines)
+
+    @staticmethod
+    def format_hook_status_panel(bible: NovelBible) -> str:
+        """伏笔状态面板：未收 + 已回收统计"""
+        total = len(bible.hooks)
+        unresolved = sum(1 for h in bible.hooks if h.status == "未收")
+        resolved = total - unresolved
+        lines = [f"## 伏笔状态: 总共{total}个 / 未收{unresolved}个 / 已收{resolved}个\n"]
+        if unresolved > 0:
+            lines.append("### ⚠️ 待回收")
+            for h in bible.hooks:
+                if h.status == "未收":
+                    exp = f" → 预计: {h.expected_resolve}" if h.expected_resolve else ""
+                    lines.append(f"- 第{h.planted_at}章: {h.description}{exp}")
+        if resolved > 0:
+            lines.append("\n### ✅ 已回收")
+            for h in bible.hooks:
+                if h.status != "未收":
+                    lines.append(f"- ~~{h.description}~~ (第{h.planted_at}章→已回收)")
         return "\n".join(lines)
 
     @staticmethod
@@ -136,3 +180,10 @@ class BibleFormatter:
         for e in sorted_events[:recent_count]:
             lines.append(f"- 第{e.chapter}章 [{e.type}] {e.summary}")
         return "\n".join(lines)
+
+
+def _extract_relation_target(relation_text: str, known_names) -> str:
+    for name in sorted(known_names, key=len, reverse=True):
+        if name in relation_text:
+            return name
+    return ""
